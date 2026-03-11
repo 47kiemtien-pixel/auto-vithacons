@@ -7,6 +7,7 @@ function App() {
   const [logs, setLogs] = useState([]);
   const [isPosting, setIsPosting] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [autoJoin, setAutoJoin] = useState(true);
   const [successGroups, setSuccessGroups] = useState([]);
   const [activeTab, setActiveTab] = useState('my-groups'); // 'my-groups' hoặc 'discover'
   const logsEndRef = useRef(null);
@@ -95,7 +96,7 @@ function App() {
       await fetch(`${API_BASE}/discover-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword })
+        body: JSON.stringify({ keyword, autoJoin })
       });
     } catch (e) {
       alert('Lỗi khi gọi API');
@@ -174,6 +175,16 @@ function App() {
             >
                 👥 Quét nhóm của tôi
             </button>
+            <div className="flex items-center gap-2 mr-2">
+                <input 
+                    type="checkbox" 
+                    id="auto-join" 
+                    checked={autoJoin} 
+                    onChange={(e) => setAutoJoin(e.target.checked)} 
+                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                />
+                <label htmlFor="auto-join" className="text-xs font-bold text-gray-600 cursor-pointer select-none">TỰ ĐỘNG GIA NHẬP</label>
+            </div>
             <button 
                 onClick={triggerDiscoverGroups}
                 className="px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shadow-sm hover:bg-blue-100 transition-all font-medium text-sm flex items-center gap-2"

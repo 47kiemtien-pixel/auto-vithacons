@@ -69,7 +69,8 @@ app.post('/api/fetch-groups', async (req, res) => {
 // API Khám phá nhóm mới (Chưa tham gia)
 app.post('/api/discover-groups', async (req, res) => {
     const keyword = req.body.keyword || '';
-    broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm mới với từ khóa: "${keyword}"` });
+    const autoJoin = req.body.autoJoin || false;
+    broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm mới với từ khóa: "${keyword}"${autoJoin ? ' (Kèm Tự động gia nhập)' : ''}` });
     
     try {
         const context = await browserManager.getContext();
@@ -84,8 +85,33 @@ app.post('/api/discover-groups', async (req, res) => {
                     broadcastLog({ type: 'info', message: msg });
                 }
             }
-        }).then((groups) => {
+        }).then(async (groups) => {
             broadcastLog({ type: 'done', message: `Đã hoàn thành khám phá nhóm. Tìm thấy ${groups.length} nhóm.` });
+            
+            if (autoJoin && groups.length > 0) {
+                const joinable = groups.filter(g => g.canJoin && !g.isJoined);
+                broadcastLog({ type: 'info', message: `Tiến hành tự động gia nhập ${joinable.length} nhóm vừa tìm thấy...` });
+                
+                for (let i = 0; i < joinable.length; i++) {
+                    const g = joinable[i];
+                    broadcastLog({ type: 'info', message: `[AutoJoin ${i+1}/${joinable.length}] Đang gia nhập: ${g.name}` });
+                    
+                    const success = await execJoinGroup(context, g.url, (msg) => {
+                        broadcastLog({ type: 'info', message: msg });
+                    });
+                    
+                    if (success) {
+                        broadcastLog({ type: 'group_discovered', group: { ...g, isJoined: true, canJoin: false } });
+                    }
+
+                    if (i < joinable.length - 1) {
+                        const delaySec = Math.floor(Math.random() * (60 - 30 + 1) + 30); // 30-60s nghỉ
+                        broadcastLog({ type: 'delay', message: `Nghỉ ${delaySec} giây tránh spam gia nhập nhóm...` });
+                        await new Promise(r => setTimeout(r, delaySec * 1000));
+                    }
+                }
+                broadcastLog({ type: 'done', message: 'Đã hoàn thành tiến trình Tự động gia nhập nhóm.' });
+            }
         }).catch(err => {
             broadcastLog({ type: 'error', message: `Lỗi khám phá nhóm: ${err.message}` });
         });
