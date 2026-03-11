@@ -88,31 +88,36 @@ app.post('/api/discover-groups', async (req, res) => {
                 }
             }
         }).then(async (groups) => {
-            broadcastLog({ type: 'done', message: `Đã hoàn thành khám phá nhóm. Tìm thấy ${groups.length} nhóm.` });
-            
             if (autoJoin && groups.length > 0) {
                 const joinable = groups.filter(g => g.canJoin && !g.isJoined);
-                broadcastLog({ type: 'info', message: `Tiến hành tự động gia nhập ${joinable.length} nhóm vừa tìm thấy...` });
+                const msg = `[Discovery] Tìm thấy ${groups.length} nhóm. Trong đó có ${joinable.length} nhóm có thể gia nhập tự động.`;
+                broadcastLog({ type: 'info', message: msg });
                 
-                for (let i = 0; i < joinable.length; i++) {
-                    const g = joinable[i];
-                    broadcastLog({ type: 'info', message: `[AutoJoin ${i+1}/${joinable.length}] Đang gia nhập: ${g.name}` });
-                    
-                    const success = await execJoinGroup(context, g.url, (msg) => {
-                        broadcastLog({ type: 'info', message: msg });
-                    });
-                    
-                    if (success) {
-                        broadcastLog({ type: 'group_discovered', group: { ...g, isJoined: true, canJoin: false } });
-                    }
+                if (joinable.length > 0) {
+                    for (let i = 0; i < joinable.length; i++) {
+                        const g = joinable[i];
+                        broadcastLog({ type: 'info', message: `[AutoJoin ${i+1}/${joinable.length}] Đang gia nhập: ${g.name}` });
+                        
+                        const success = await execJoinGroup(context, g.url, (msg) => {
+                            broadcastLog({ type: 'info', message: msg });
+                        });
+                        
+                        if (success) {
+                            broadcastLog({ type: 'group_discovered', group: { ...g, isJoined: true, canJoin: false } });
+                        }
 
-                    if (i < joinable.length - 1) {
-                        const delaySec = Math.floor(Math.random() * (120 - 60 + 1) + 60); // 60-120s nghỉ
-                        broadcastLog({ type: 'delay', message: `Đang tham gia "từ từ" để an toàn... Nghỉ ${delaySec} giây tiếp theo...` });
-                        await new Promise(r => setTimeout(r, delaySec * 1000));
+                        if (i < joinable.length - 1) {
+                            const delaySec = Math.floor(Math.random() * (120 - 60 + 1) + 60); // 60-120s nghỉ
+                            broadcastLog({ type: 'delay', message: `Đang tham gia "từ từ" để an toàn... Nghỉ ${delaySec} giây tiếp theo...` });
+                            await new Promise(r => setTimeout(r, delaySec * 1000));
+                        }
                     }
+                    broadcastLog({ type: 'done', message: 'Đã hoàn thành tiến trình Khám phá & Tự động gia nhập nhóm.' });
+                } else {
+                    broadcastLog({ type: 'done', message: 'Đã hoàn thành khám phá nhóm. Không tìm thấy nhóm mới nào khả dụng để gia nhập.' });
                 }
-                broadcastLog({ type: 'done', message: 'Đã hoàn thành tiến trình Tự động gia nhập nhóm.' });
+            } else {
+                broadcastLog({ type: 'done', message: `Đã hoàn thành khám phá nhóm. Tìm thấy ${groups.length} nhóm.` });
             }
         }).catch(err => {
             broadcastLog({ type: 'error', message: `Lỗi khám phá nhóm: ${err.message}` });

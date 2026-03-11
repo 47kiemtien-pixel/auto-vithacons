@@ -38,20 +38,29 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                         const info = lines[1]; // Vd: "Công khai · 141K thành viên"
                         
                         // Kiểm tra trạng thái Join
-                        // Nút Tham gia thường có chữ "Tham gia" hoặc "Join"
                         let joinBtnFound = false;
                         const buttons = item.querySelectorAll('div[role="button"]');
                         for (const btn of buttons) {
                             const btnText = (btn.innerText || '').trim();
+                            const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                            
                             const joinTexts = ['Tham gia', 'Join', 'Tham gia nhóm', 'Join Group', 'Request to Join', 'Yêu cầu tham gia'];
-                            if (joinTexts.some(t => btnText === t)) {
+                            const isJoinLabel = ariaLabel.includes('tham gia group') || ariaLabel.includes('join group') || ariaLabel.includes('tham gia nhóm') || ariaLabel === 'tham gia' || ariaLabel === 'join';
+
+                            if (joinTexts.some(t => btnText === t) || isJoinLabel) {
                                 joinBtnFound = true;
                                 break;
                             }
                         }
                         
                         // Nếu text chứa "Đã tham gia" hoặc "Joined" thì bỏ qua hoặc đánh dấu
-                        const isJoined = text.includes('Đã tham gia') || text.includes('Joined') || text.includes('Đã gửi yêu cầu') || text.includes('Requested') || text.includes('Pending') || text.includes('Đang chờ');
+                        const textLower = text.toLowerCase();
+                        const isJoined = textLower.includes('đã tham gia') || 
+                                         textLower.includes('joined') || 
+                                         textLower.includes('đã gửi yêu cầu') || 
+                                         textLower.includes('requested') || 
+                                         textLower.includes('pending') || 
+                                         textLower.includes('đang chờ');
 
                         results.push({
                             name: name,
