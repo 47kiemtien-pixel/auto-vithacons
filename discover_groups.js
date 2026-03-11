@@ -39,29 +39,24 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                         
                         // Kiểm tra trạng thái Join
                         let joinBtnFound = false;
-                        // Tìm tất cả các element có khả năng là nút bấm
-                        const joinSelectors = [
-                            '[role="button"]',
-                            'div[aria-label]',
-                            'span[role="button"]',
-                            'a[role="button"]'
-                        ];
-                        
-                        const buttons = item.querySelectorAll(joinSelectors.join(','));
+                        const buttons = item.querySelectorAll('[role="button"]');
                         for (const btn of buttons) {
-                            const btnText = (btn.innerText || '').trim();
                             const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
+                            const btnText = (btn.innerText || '').trim();
                             
-                            const joinTexts = ['Tham gia', 'Join', 'Tham gia nhóm', 'Join Group', 'Request to Join', 'Yêu cầu tham gia', 'Tham gia Group'];
-                            const isJoinLabel = ariaLabel.includes('tham gia group') || ariaLabel.includes('join group') || ariaLabel.includes('tham gia nhóm') || ariaLabel === 'tham gia' || ariaLabel === 'join';
-
-                            if (joinTexts.some(t => btnText === t) || isJoinLabel) {
+                            // Dựa trên DOM thực tế: aria-label="Tham gia nhóm [Tên nhóm]"
+                            if (ariaLabel.startsWith('tham gia nhóm') || 
+                                ariaLabel.startsWith('join group') || 
+                                btnText === 'Tham gia' || 
+                                btnText === 'Join' ||
+                                btnText === 'Tham gia nhóm' ||
+                                btnText === 'Join Group') {
                                 joinBtnFound = true;
                                 break;
                             }
                         }
                         
-                        // Nếu text chứa "Đã tham gia" hoặc "Joined" thì bỏ qua hoặc đánh dấu
+                        // Nếu text chứa "Đã tham gia" hoặc "Joined" thì bỏ qua
                         const textLower = text.toLowerCase();
                         const isJoined = textLower.includes('đã tham gia') || 
                                          textLower.includes('joined') || 
