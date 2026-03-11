@@ -39,12 +39,20 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                         
                         // Kiểm tra trạng thái Join
                         let joinBtnFound = false;
-                        const buttons = item.querySelectorAll('div[role="button"]');
+                        // Tìm tất cả các element có khả năng là nút bấm
+                        const joinSelectors = [
+                            '[role="button"]',
+                            'div[aria-label]',
+                            'span[role="button"]',
+                            'a[role="button"]'
+                        ];
+                        
+                        const buttons = item.querySelectorAll(joinSelectors.join(','));
                         for (const btn of buttons) {
                             const btnText = (btn.innerText || '').trim();
                             const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
                             
-                            const joinTexts = ['Tham gia', 'Join', 'Tham gia nhóm', 'Join Group', 'Request to Join', 'Yêu cầu tham gia'];
+                            const joinTexts = ['Tham gia', 'Join', 'Tham gia nhóm', 'Join Group', 'Request to Join', 'Yêu cầu tham gia', 'Tham gia Group'];
                             const isJoinLabel = ariaLabel.includes('tham gia group') || ariaLabel.includes('join group') || ariaLabel.includes('tham gia nhóm') || ariaLabel === 'tham gia' || ariaLabel === 'join';
 
                             if (joinTexts.some(t => btnText === t) || isJoinLabel) {
