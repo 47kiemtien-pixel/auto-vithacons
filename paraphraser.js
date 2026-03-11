@@ -6,21 +6,14 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 async function paraphrase(content) {
     try {
         const model = genAI.getGenerativeModel({ model: "gemini-2.5-flash" });
-        const postBoxSelectors = [
-            'div[role="button"] span:has-text("Bạn đang nghĩ gì?")',
-            'div[role="button"] span:has-text("Viết nội dung nào đó...")',
-            'div[role="button"]:has-text("Bạn đang nghĩ gì?")',
-            'div[role="button"]:has-text("Write something...")',
-            'div[role="button"]:has-text("Tạo một bài viết công khai...")',
-            'div[role="button"]:has-text("Create a public post...")',
-            '[aria-label="Bạn đang nghĩ gì?"]',
-            '[aria-label="What\'s on your mind?"]',
-            '[role="main"] [role="button"]' // General fallback in main area
-        ];
-        const prompt = `Hãy viết lại nội dung sau đây để đăng lên Facebook sao cho tự nhiên, thu hút và tránh bị hệ thống quét spam. 
-        Giữ nguyên ý nghĩa chính và các thông tin quan trọng. 
-        Chỉ trả về nội dung đã viết lại, không thêm lời dẫn giải.
         
+        const prompt = `Hãy điều chỉnh cực kỳ ít nội dung sau đây (chỉ thay đổi 1-2 từ đồng nghĩa hoặc đảo nhẹ cấu trúc câu) để tránh bị Facebook quét spam, nhưng phải GIỮ NGUYÊN 95% văn bản gốc và không được làm thay đổi phong cách viết hay ý nghĩa. 
+        
+        Yêu cầu:
+        1. Thay đổi ít nhất có thể.
+        2. Giữ nguyên các thông tin liên hệ, link, hoặc thông số kỹ thuật.
+        3. Chỉ trả về nội dung đã điều chỉnh, không thêm lời dẫn.
+
         Nội dung gốc:
         ${content}`;
 
