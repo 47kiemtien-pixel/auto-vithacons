@@ -15,6 +15,7 @@ const PORT = 3001;
 
 let isPosting = false;
 let isScanning = false;
+let isDiscovering = false;
 let activeClients = [];
 
 // API Lấy danh sách nhóm đã tham gia (lưu trong file)
@@ -68,6 +69,7 @@ app.post('/api/fetch-groups', async (req, res) => {
 
 // API Khám phá nhóm mới (Chưa tham gia)
 app.post('/api/discover-groups', async (req, res) => {
+    isDiscovering = true;
     const keyword = req.body.keyword || '';
     const autoJoin = req.body.autoJoin || false;
     broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm mới với từ khóa: "${keyword}"${autoJoin ? ' (Kèm Tự động gia nhập)' : ''}` });
@@ -114,6 +116,8 @@ app.post('/api/discover-groups', async (req, res) => {
             }
         }).catch(err => {
             broadcastLog({ type: 'error', message: `Lỗi khám phá nhóm: ${err.message}` });
+        }).finally(() => {
+            isDiscovering = false;
         });
         
         res.json({ success: true, message: 'Tiến trình khám phá đang chạy ngầm...' });
