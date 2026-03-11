@@ -39,25 +39,26 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                         
                         // Kiểm tra trạng thái Join
                         // Nút Tham gia thường có chữ "Tham gia" hoặc "Join"
-                        let joinBtn = null;
+                        let joinBtnFound = false;
                         const buttons = item.querySelectorAll('div[role="button"]');
                         for (const btn of buttons) {
-                            const btnText = btn.innerText || '';
-                            if (btnText === 'Tham gia' || btnText === 'Join' || btnText === 'Tham gia nhóm' || btnText === 'Join Group') {
-                                joinBtn = btn;
+                            const btnText = (btn.innerText || '').trim();
+                            const joinTexts = ['Tham gia', 'Join', 'Tham gia nhóm', 'Join Group', 'Request to Join', 'Yêu cầu tham gia'];
+                            if (joinTexts.some(t => btnText === t)) {
+                                joinBtnFound = true;
                                 break;
                             }
                         }
                         
                         // Nếu text chứa "Đã tham gia" hoặc "Joined" thì bỏ qua hoặc đánh dấu
-                        const isJoined = text.includes('Đã tham gia') || text.includes('Joined') || text.includes('Đã gửi yêu cầu') || text.includes('Requested');
+                        const isJoined = text.includes('Đã tham gia') || text.includes('Joined') || text.includes('Đã gửi yêu cầu') || text.includes('Requested') || text.includes('Pending') || text.includes('Đang chờ');
 
                         results.push({
                             name: name,
                             url: fullUrl,
                             info: info,
                             isJoined: isJoined,
-                            canJoin: !isJoined && (text.includes('Tham gia') || text.includes('Join'))
+                            canJoin: !isJoined && joinBtnFound
                         });
                     }
                 }

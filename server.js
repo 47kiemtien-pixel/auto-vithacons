@@ -107,8 +107,8 @@ app.post('/api/discover-groups', async (req, res) => {
                     }
 
                     if (i < joinable.length - 1) {
-                        const delaySec = Math.floor(Math.random() * (60 - 30 + 1) + 30); // 30-60s nghỉ
-                        broadcastLog({ type: 'delay', message: `Nghỉ ${delaySec} giây tránh spam gia nhập nhóm...` });
+                        const delaySec = Math.floor(Math.random() * (120 - 60 + 1) + 60); // 60-120s nghỉ
+                        broadcastLog({ type: 'delay', message: `Đang tham gia "từ từ" để an toàn... Nghỉ ${delaySec} giây tiếp theo...` });
                         await new Promise(r => setTimeout(r, delaySec * 1000));
                     }
                 }
