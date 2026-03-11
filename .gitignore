@@ -16,6 +16,7 @@ node-portable/
 # Temporary / Debug / Data files
 dump_*/
 dump_*.js
+dump_user_*.txt
 *.png
 *.html
 *.json
