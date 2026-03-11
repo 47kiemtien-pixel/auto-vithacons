@@ -71,8 +71,11 @@ app.post('/api/fetch-groups', async (req, res) => {
 app.post('/api/discover-groups', async (req, res) => {
     isDiscovering = true;
     const keyword = req.body.keyword || '';
-    const autoJoin = req.body.autoJoin || false;
-    broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm mới với từ khóa: "${keyword}"${autoJoin ? ' (Kèm Tự động gia nhập)' : ''}` });
+    // Xử lý kỹ cờ autoJoin từ UI
+    const autoJoin = req.body.autoJoin === true || req.body.autoJoin === 'true';
+    
+    console.log(`[API] Khám phá nhóm: ${keyword}, AutoJoin=${autoJoin}`);
+    broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm: "${keyword}". Chế độ Tự động gia nhập: ${autoJoin ? 'BẬT' : 'TẮT'}` });
     
     try {
         const context = await browserManager.getContext();
