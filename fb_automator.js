@@ -271,7 +271,7 @@ class FBAutomator {
                  return 'published';
             }
             
-            console.log('==> [KẾT QUẢ]: Không tìm thấy bài đăng. Có thể tính năng chống tin rác của Facebook đã ẩn, hoặc cần thêm thời gian để bài hiển thị.');
+            console.log('==> [KẾT QUẢ]: Không tìm thấy bài đăng tại link cá nhân. Có thể bài đã bị gỡ hoặc chưa hiển thị.');
             return 'not_found';
             
         } catch (error) {
