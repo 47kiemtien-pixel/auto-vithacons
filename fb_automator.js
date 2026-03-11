@@ -187,14 +187,37 @@ class FBAutomator {
                 await submitButton.click();
                 console.log('[FB] Đã nhấn nút Đăng! Đang chờ tiến trình tải lên hoàn tất...');
                 
-                // Đợi hộp thoại đóng lại (nghĩa là đăng thành công)
+                // Đợi hộp thoại chính ẩn đi HOẶC xuất hiện hộp thoại Alert của Facebook
+                let postStatus = 'success';
                 try {
-                    await this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 90000 });
+                    // Chờ Dialog chính đóng lại
+                    await this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 30000 });
                     console.log('[FB] Hộp thoại đăng bài đã đóng (Tải lên hoàn tất).');
                 } catch(e) {
-                     console.log('[FB] Hộp thoại chưa đóng sau 90s. Có thể vẫn đang tải hoặc bị lỗi.');
+                     // Nếu dialog chưa đóng, kiểm tra xem có popup "Hệ thống đã tự động từ chối" không
+                     const pageText = await this.page.innerText('body');
+                     if (pageText.includes('tự động từ chối bài viết') || pageText.includes('không đáp ứng tiêu chí') || pageText.includes('Liên kết trong bài viết')) {
+                         console.log('[FB] PHÁT HIỆN: Bài viết bị nhóm TỪ CHỐI TỰ ĐỘNG (Auto-mod declined).');
+                         if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
+                             postStatus = 'rejected_link';
+                             console.log('[FB] Lý do: Nhóm này CẤM CHÈN LINK.');
+                         } else {
+                             postStatus = 'rejected_other';
+                         }
+                         
+                         // Cố gắng đóng popup X để không kẹt
+                         try {
+                             const closeX = await this.page.$('div[aria-label="Đóng"], div[aria-label="Close"]');
+                             if (closeX) await closeX.click();
+                         } catch(e2) {}
+                     } else {
+                         console.log('[FB] Hộp thoại chưa đóng sau 30s nhưng không thấy popup từ chối rõ ràng.');
+                     }
                 }
                 
+                if (postStatus === 'rejected_link') return { success: false, reason: 'rejected_link' };
+                if (postStatus === 'rejected_other') return { success: false, reason: 'rejected_other' };
+
                 // Đợi một chút để Facebook xử lý và hiển thị thông báo (nếu có)
                 await sleep(5000);
                 
@@ -208,7 +231,7 @@ class FBAutomator {
                     }
                 } catch(e) {}
                 
-                await sleep(10000); // Quãng nghỉ 10s trước khi qua bước check link thủ công
+                await sleep(5000);
                 
                 return { success: true, pending: isPending };
             } else {

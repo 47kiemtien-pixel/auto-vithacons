@@ -7,6 +7,13 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
     const fs = require('fs');
     const path = require('path');
     
+    // Đọc danh sách nhóm cấm link
+    const antiLinkPath = path.join(__dirname, 'anti_link_groups.txt');
+    let antiLinkGroups = new Set();
+    if (fs.existsSync(antiLinkPath)) {
+        antiLinkGroups = new Set(fs.readFileSync(antiLinkPath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l));
+    }
+
     // Đọc nội dung từ file content.txt
     const contentPath = path.join(__dirname, 'content.txt');
     let baseContent = '';
@@ -67,8 +74,16 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
             console.log(`[Main] Đang chuẩn bị nội dung cho nhóm: ${groupUrl}`);
             let finalContent = baseContent;
             
+            // KIỂM TRA NẾU NHÓM CẤM LINK -> XOÁ LINK KHỎI NỘI DUNG
+            if (antiLinkGroups.has(groupUrl)) {
+                logCallback({ type: 'warning', message: `⚠️ Nhóm này CẤM LINK. Đang tự động loại bỏ các liên kết...`, groupUrl });
+                // Regex để tìm URL: http, https, .com, .vn, ...
+                const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
+                finalContent = finalContent.replace(urlRegex, '[đã lược bỏ link]');
+            }
+
             try {
-                const rewritten = await paraphrase(baseContent);
+                const rewritten = await paraphrase(finalContent);
                 if (rewritten && rewritten.trim() !== "") {
                     finalContent = rewritten;
                     console.log(`[Main] Nội dung đã rewrite:\n"${finalContent}"`);
@@ -95,8 +110,6 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                     console.log(msg);
                     logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
                 } else if (fbUserId) {
-                    // Kiểm tra URL nhóm / user
-                    // await automator.verifyPost(groupUrl, fbUserId, finalContent);
                     logCallback({ type: 'success', message: 'Đăng thành công!', groupUrl, status: 'published' });
                 } else {
                     const msg = `[Main] Đăng thành công (Chưa có tính năng verify vì thiếu FB_USER_ID).`;
@@ -116,9 +129,21 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                     await sleep(delayMs);
                 }
             } else {
-                const msg = '[Main] Đăng bài thất bại.';
-                console.log(msg);
-                logCallback({ type: 'error', message: msg, groupUrl, status: 'failed' });
+                if (result && result.reason === 'rejected_link') {
+                    const msg = '❌ BỊ TỪ CHỐI: Nhóm này không cho phép đăng Link. Đã lưu vào danh sách hạn chế.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'rejected_link' });
+                    
+                    // Lưu vào danh sách cấm link
+                    if (!antiLinkGroups.has(groupUrl)) {
+                        fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
+                        antiLinkGroups.add(groupUrl);
+                    }
+                } else {
+                    const msg = '[Main] Đăng bài thất bại.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'failed' });
+                }
             }
         }
         

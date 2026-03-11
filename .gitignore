@@ -32,6 +32,7 @@ debug_search_dom.html
 extracted_groups.txt
 groups_data.json
 posted_history.txt
+anti_link_groups.txt
 content.txt
 *.log
 
