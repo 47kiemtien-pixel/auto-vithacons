@@ -109,12 +109,41 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                     const msg = `[Main] Đăng xong, Facebook báo ĐANG CHỜ PHÊ DUYỆT ngay lập tức.`;
                     console.log(msg);
                     logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
-                } else if (fbUserId) {
-                    logCallback({ type: 'success', message: 'Đăng thành công!', groupUrl, status: 'published' });
                 } else {
-                    const msg = `[Main] Đăng thành công (Chưa có tính năng verify vì thiếu FB_USER_ID).`;
+                    const msg = `[Main] Đăng thành công! Đang đợi 90 giây để kiểm tra xem bài có bị gỡ thầm lặng không...`;
                     console.log(msg);
-                    logCallback({ type: 'success', message: msg, groupUrl, status: 'published' });
+                    logCallback({ type: 'info', message: msg, groupUrl });
+                    
+                    await sleep(90000); // Đợi 1.5 phút để FB filter link (nếu có)
+                    
+                    const removedStatus = await automator.checkRemovedContent(groupUrl);
+                    if (removedStatus === 'removed_by_link') {
+                        const retryMsg = '⚠️ PHÁT HIỆN: Bài viết vừa đăng đã bị gỡ thầm lặng do CHỨA LINK. Tiến hành đăng lại lần 2 KHÔNG KÈM LINK...';
+                        console.log(retryMsg);
+                        logCallback({ type: 'warning', message: retryMsg, groupUrl });
+
+                        // Lưu vào danh sách cấm link vĩnh viễn
+                        if (!antiLinkGroups.has(groupUrl)) {
+                            fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
+                            antiLinkGroups.add(groupUrl);
+                        }
+
+                        // Xử lý lại nội dung không kèm link
+                        const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
+                        const contentNoLink = finalContent.replace(urlRegex, '[đã lược bỏ link]');
+                        
+                        // Đăng lại lần 2
+                        const retryResult = await automator.postToGroup(groupUrl, contentNoLink, imagePaths);
+                        if (retryResult && retryResult.success) {
+                            logCallback({ type: 'success', message: '✅ ĐÃ ĐĂNG LẠI THÀNH CÔNG (Không kèm link).', groupUrl, status: 'published' });
+                        } else {
+                            logCallback({ type: 'error', message: '❌ Thất bại khi cố gắng đăng lại.', groupUrl });
+                        }
+                    } else if (removedStatus === 'removed_other') {
+                        logCallback({ type: 'error', message: '❌ Bài viết bị gỡ do lý do khác (Spam/Vi phạm tiêu chuẩn).', groupUrl });
+                    } else {
+                        logCallback({ type: 'success', message: '✅ Bài viết vẫn ổn định (Không bị gỡ).', groupUrl, status: 'published' });
+                    }
                 }
                 
                 // Nghỉ ngơi giữa các nhóm nếu không phải nhóm cuối cùng

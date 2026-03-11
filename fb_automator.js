@@ -280,6 +280,39 @@ class FBAutomator {
         }
     }
 
+    async checkRemovedContent(groupUrl) {
+        try {
+            const removedUrl = `${groupUrl.replace(/\/$/, '')}/my_removed_content/`;
+            console.log(`[FB] Đang kiểm tra nội dung bị gỡ tại: ${removedUrl}`);
+            await this.page.goto(removedUrl);
+            await sleep(5000);
+
+            const pageText = await this.page.innerText('body') || '';
+            
+            // Tìm kiếm các lý do liên quan đến Link hoặc Spam
+            if (pageText.includes('Nhiều người báo cáo') || 
+                pageText.includes('Liên kết') || 
+                pageText.includes('Link') || 
+                pageText.includes('vi phạm tiêu chuẩn cộng đồng') ||
+                pageText.includes('Tự động gỡ') ||
+                pageText.includes('Auto-removed')) {
+                
+                console.log('==> [CẢNH BÁO]: Phát hiện có bài viết bị Facebook gỡ trong nhóm này.');
+                
+                if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
+                    return 'removed_by_link';
+                }
+                return 'removed_other';
+            }
+            
+            console.log('[FB] Không thấy bài viết nào bị gỡ gần đây.');
+            return 'clean';
+        } catch (error) {
+            console.error('[FB] Lỗi khi kiểm tra removed content:', error);
+            return 'error';
+        }
+    }
+
     async close() {
         if (this.page) {
             await this.page.close();
