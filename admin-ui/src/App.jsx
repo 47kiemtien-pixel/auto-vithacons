@@ -301,8 +301,16 @@ function App() {
 
         {/* CỘT 3: THÀNH CÔNG */}
         <section className="col-span-3 flex flex-col bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden h-[85vh]">
-          <div className="bg-green-600 px-4 py-3 text-white font-bold text-sm tracking-wide">
-             BÀI ĐÃ ĐĂNG ({successGroups.length})
+          <div className="bg-green-600 px-4 py-3 text-white font-bold text-sm tracking-wide flex justify-between items-center">
+             <span>BÀI ĐÃ ĐĂNG ({successGroups.length})</span>
+             {successGroups.length > 0 && (
+               <button 
+                 onClick={() => setSuccessGroups([])}
+                 className="text-[10px] bg-green-700 hover:bg-green-800 px-2 py-1 rounded transition-colors"
+               >
+                 XÓA DANH SÁCH
+               </button>
+             )}
           </div>
           <div className="flex-1 overflow-y-auto p-3 space-y-2">
              {successGroups.length === 0 ? (
