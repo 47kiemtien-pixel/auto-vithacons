@@ -1,0 +1,12 @@
+{
+  "groups": [
+    "https://www.facebook.com/groups/test-group-1",
+    "https://www.facebook.com/groups/test-group-2"
+  ],
+  "content": "Chào cả nhà! Đây là bài đăng tự động từ bot.",
+  "imagePath": "",
+  "delay": {
+    "min": 300,
+    "max": 600
+  }
+}

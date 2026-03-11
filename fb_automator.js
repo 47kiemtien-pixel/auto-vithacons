@@ -1,0 +1,268 @@
+const { chromium } = require('playwright');
+const path = require('path');
+const { sleep } = require('./scheduler');
+
+class FBAutomator {
+    constructor() {
+        this.browser = null;
+        this.context = null;
+        this.page = null;
+        this.userDataDir = path.join(__dirname, 'fb_user_data');
+    }
+
+    async init(externalContext) {
+        if (externalContext) {
+            this.context = externalContext;
+            console.log('[FB] Sử dụng context trình duyệt từ máy chủ...');
+        } else {
+            console.log('[FB] Khởi tạo trình duyệt độc lập...');
+            this.context = await chromium.launchPersistentContext(this.userDataDir, {
+                headless: false,
+                viewport: { width: 1280, height: 720 },
+                args: ['--disable-notifications']
+            });
+        }
+        this.page = await this.context.newPage();
+    }
+
+    async login() {
+        console.log('[FB] Kiểm tra đăng nhập...');
+        await this.page.goto('https://www.facebook.com');
+        
+        // Kiểm tra xem đã đăng nhập chưa
+        const isLoggedIn = await this.page.$('[aria-label="Your profile"]') || await this.page.$('[aria-label="Trang cá nhân của bạn"]');
+        
+        if (!isLoggedIn) {
+            console.log('[FB] Chưa đăng nhập. Vui lòng đăng nhập thủ công trên cửa sổ trình duyệt...');
+            // Đợi người dùng đăng nhập thủ công (tối đa 5 phút)
+            await this.page.waitForSelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]', { timeout: 300000 });
+            console.log('[FB] Đăng nhập thành công!');
+        } else {
+            console.log('[FB] Đã đăng nhập từ phiên trước.');
+        }
+    }
+
+    async postToGroup(groupUrl, content, imagePaths = []) {
+        try {
+            console.log(`[FB] Đang truy cập nhóm: ${groupUrl}`);
+            await this.page.goto(groupUrl);
+            await sleep(3000);
+
+            const postBoxSelectors = [
+                'text="Bạn viết gì đi..."',
+                'div[role="button"]:has(span:has-text("Bạn viết gì đi..."))',
+                'div[role="button"] span:has-text("Bạn đang nghĩ gì?")',
+                'div[role="button"] span:has-text("Viết nội dung nào đó...")',
+                'div[role="button"]:has-text("Bạn đang nghĩ gì?")',
+                'div[role="button"]:has-text("Write something...")',
+                '[aria-label="Bạn đang nghĩ gì?"]',
+                '[aria-label="What\'s on your mind?"]'
+            ];
+
+            let clicked = false;
+            for (const selector of postBoxSelectors) {
+                try {
+                    const elements = await this.page.$$(selector);
+                    for (let el of elements) {
+                        if (await el.isVisible()) {
+                            await el.click();
+                            clicked = true;
+                            break;
+                        }
+                    }
+                    if(clicked) break;
+                } catch (e) {}
+            }
+
+            if (!clicked) {
+                // Selector dự phòng cuối cùng
+                const mainPostButton = await this.page.$('[role="main"] [role="button"]:has-text("Bạn"), [role="main"] [role="button"]:has-text("Write")');
+                if (mainPostButton) {
+                    await mainPostButton.click();
+                    clicked = true;
+                }
+            }
+
+            if (!clicked) {
+                console.error('[FB] Không tìm thấy ô để bắt đầu soạn bài.');
+                return false;
+            }
+
+            await sleep(3000); // Đợi hộp thoại hiện lên
+
+            // Tải ảnh lên nếu có
+            if (imagePaths.length > 0) {
+                console.log(`[FB] Đang tải lên ${imagePaths.length} ảnh...`);
+                // Tìm đúng nút ảnh trong hộp thoại soạn thảo. Lưu ý case-sensitive của "video"
+                const photoVideoBtn = await this.page.$('div[aria-label="Ảnh/video"], div[aria-label="Ảnh/Video"], div[aria-label="Photo/video"], div[aria-label="Photo/Video"]');
+                if (photoVideoBtn) {
+                    await photoVideoBtn.click();
+                    await sleep(2000);
+                    
+                    const fileInput = await this.page.$('input[type="file"][multiple]');
+                    if (fileInput) {
+                        await fileInput.setInputFiles(imagePaths);
+                        await sleep(5000); // Đợi ảnh load kỹ hơn
+                    } else {
+                        // Dự phòng nếu không tìm thấy multiple
+                        const singleInput = await this.page.$('input[type="file"]');
+                        if (singleInput && imagePaths.length > 0) {
+                             console.log('[FB] Cảnh báo: Chỉ tìm thấy input đơn, tải lên ảnh đầu tiên.');
+                             await singleInput.setInputFiles([imagePaths[0]]);
+                             await sleep(3000);
+                        }
+                    }
+                }
+            }
+
+            console.log('[FB] Đang nhập nội dung bài đăng...');
+            // Tìm đến ô nhâp text nằm TRONG hộp thoại đăng bài (dialog) để tránh nhầm với ô bình luận
+            const inputSelector = 'div[role="dialog"] div[role="textbox"][contenteditable="true"]';
+            await this.page.waitForSelector(inputSelector);
+            await sleep(1000);
+            const textboxes = await this.page.$$(inputSelector);
+            let typed = false;
+            for(let tb of textboxes) {
+                if(await tb.isVisible()) {
+                    console.log("[FB] Tìm thấy ô nhập chữ trong dialog, tiến hành gõ nội dung...");
+                    await tb.click();
+                    await sleep(500);
+                    // Dùng bàn phím để gõ từng chữ một sẽ an toàn hơn trên các framework React phức tạp như Facebook
+                    await this.page.keyboard.insertText(content);
+                    typed = true;
+                    break;
+                }
+            }
+            
+            if(!typed) {
+                console.log("[FB] Vẫn không nhập được văn bản bằng click. Thử fallback...");
+                // Tìm aria-label cụ thể
+                const fallbackInput = await this.page.$('div[aria-label="Bạn viết gì đi..."][contenteditable="true"]');
+                if (fallbackInput) {
+                    await fallbackInput.fill(content);
+                    typed = true;
+                }
+            }
+            
+            await sleep(3000);
+            console.log('[FB] Đang nhấn nút Đăng...');
+            
+            const submitButtonSelectors = [
+                'div[aria-label="Đăng"]',
+                'div[aria-label="Post"]',
+                'div[aria-label="Đăng bài"]',
+                'div[role="button"]:has-text("Đăng")',
+                'div[role="button"]:has-text("Post")'
+            ];
+
+            let submitButton = null;
+            for (const selector of submitButtonSelectors) {
+                try {
+                    const elements = await this.page.$$(selector);
+                    for (let el of elements) {
+                        if (await el.isVisible()) {
+                            // Kiểm tra xem nút có bị disabled không do đang tải ảnh
+                            let isDisabled = await el.getAttribute('aria-disabled');
+                            let waitCount = 0;
+                            while (isDisabled === 'true' && waitCount < 30) {
+                                console.log(`[FB] Nút Đăng đang bị vô hiệu hóa (đang tải ảnh...), đợi thêm... (${waitCount * 2}s)`);
+                                await sleep(2000);
+                                isDisabled = await el.getAttribute('aria-disabled');
+                                waitCount++;
+                            }
+
+                            if (isDisabled !== 'true') {
+                                submitButton = el;
+                                break;
+                            } else {
+                                console.log('[FB] Quá thời gian chờ tải ảnh (60s), nút Đăng vẫn bị khóa.');
+                            }
+                        }
+                    }
+                    if(submitButton) break;
+                } catch(e) {}
+            }
+
+            if (submitButton) {
+                await submitButton.click();
+                console.log('[FB] Đã nhấn nút Đăng! Đang chờ tiến trình tải lên hoàn tất...');
+                
+                // Đợi hộp thoại đóng lại (nghĩa là đăng thành công)
+                try {
+                    await this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 90000 });
+                    console.log('[FB] Hộp thoại đăng bài đã đóng (Tải lên hoàn tất).');
+                } catch(e) {
+                     console.log('[FB] Hộp thoại chưa đóng sau 90s. Có thể vẫn đang tải hoặc bị lỗi.');
+                }
+                
+                // Đợi một chút để Facebook xử lý và hiển thị thông báo (nếu có)
+                await sleep(5000);
+                
+                // Bắt nhanh popup "Đang chờ phê duyệt" ngay sau khi đăng
+                let isPending = false;
+                try {
+                    const pageText = await this.page.innerText('body');
+                    if (pageText.includes('đang chờ phê duyệt') || pageText.includes('Đang chờ quản trị viên')) {
+                        isPending = true;
+                        console.log('[FB] Đã thấy thông báo bài đăng đang chờ duyệt ngay tại popup.');
+                    }
+                } catch(e) {}
+                
+                await sleep(10000); // Quãng nghỉ 10s trước khi qua bước check link thủ công
+                
+                return { success: true, pending: isPending };
+            } else {
+                console.error('[FB] Không tìm thấy nút Đăng hoặc nút bị vô hiệu hóa vĩnh viễn.');
+                return { success: false, pending: false };
+            }
+
+        } catch (error) {
+            console.error(`[FB] Lỗi khi đăng bài lên ${groupUrl}:`, error);
+            return { success: false, pending: false };
+        }
+    }
+
+    // Hàm verify bằng cách truy cập thẳng link nhóm / user
+    async verifyPost(groupUrl, userId, content) {
+        try {
+            if (!userId) {
+                console.log('[FB] Bỏ qua bước kiểm tra bài đăng vì chưa cấu hình FB_USER_ID.');
+                return;
+            }
+            // Tạo link chuẩn: https://www.facebook.com/groups/id_nhom/user/id_user/
+            const checkUrl = `${groupUrl.replace(/\/$/, '')}/user/${userId}/`;
+            console.log(`[FB] Đang kiểm tra trạng thái bài đăng tại: ${checkUrl}`);
+            await this.page.goto(checkUrl);
+            await sleep(8000); // Đợi trang load các bài post
+            
+            const pageText = await this.page.innerText('body') || '';
+            const shortContent = content.substring(0, 40).trim(); // Lấy 40 ký tự đầu làm từ khóa tìm kiếm
+            
+            if (pageText.includes('đang chờ phê duyệt') || pageText.includes('Đang chờ quản trị viên') || pageText.includes('Bài viết đang chờ xử lý')) {
+                 console.log('==> [KẾT QUẢ]: Bài đăng thành công nhưng ĐANG CHỜ QUẢN TRỊ VIÊN PHÊ DUYỆT.');
+                 return 'pending';
+            }
+            
+            if (pageText.includes(shortContent)) {
+                 console.log('==> [KẾT QUẢ]: Bài đăng ĐÃ ĐƯỢC XUẤT BẢN THÀNH CÔNG trên nhóm!');
+                 return 'published';
+            }
+            
+            console.log('==> [KẾT QUẢ]: Không tìm thấy bài đăng. Có thể tính năng chống tin rác của Facebook đã ẩn, hoặc cần thêm thời gian để bài hiển thị.');
+            return 'not_found';
+            
+        } catch (error) {
+            console.error('[FB] Lỗi khi kiểm tra bài đăng:', error);
+            return 'error';
+        }
+    }
+
+    async close() {
+        if (this.page) {
+            await this.page.close();
+            this.page = null;
+        }
+    }
+}
+
+module.exports = FBAutomator;

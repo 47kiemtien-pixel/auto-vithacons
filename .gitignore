@@ -1,0 +1,39 @@
+# Dependencies
+node_modules/
+admin-ui/node_modules/
+.pnp
+.pnp.js
+
+# Testing
+coverage/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Private data / Sessions
+fb_user_data/
+.env
+posted_history.txt
+groups_data.json
+extracted_groups.txt
+content.txt
+*.log
+debug_search_groups.png
+debug_search_results.json
+debug_search_dom.html
+
+# Production
+dist/
+build/
+.next/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Temporary
+tmp/
+temp/
