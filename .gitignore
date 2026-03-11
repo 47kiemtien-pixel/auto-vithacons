@@ -1,39 +1,48 @@
-# Dependencies
-node_modules/
-admin-ui/node_modules/
-.pnp
-.pnp.js
+# Projects to ignore (Not part of auto-vithacons)
+auto-poster/
+chatbot/
+construction-quote-app/
+thong_bao_viet_thanh/
+vithacon-landing/
+vithacon-quote/
+vithacon-react/
+bao-gia-thang-may/
 
-# Testing
-coverage/
+# Installers
+git-installer.exe
+node-installer.msi
+node-portable/
 
-# OS
-.DS_Store
-Thumbs.db
-
-# Private data / Sessions
-fb_user_data/
-.env
-posted_history.txt
-groups_data.json
-extracted_groups.txt
-content.txt
-*.log
+# Temporary / Debug / Data files
+dump_*/
+dump_*.js
+*.png
+*.html
+*.json
+!package.json
+!package-lock.json
+!groups_data.json.template
+fb_joins_screenshot.png
+fb_user_history.png
+fb_user_nopost.png
 debug_search_groups.png
 debug_search_results.json
 debug_search_dom.html
+extracted_groups.txt
+groups_data.json
+posted_history.txt
+content.txt
+*.log
 
-# Production
-dist/
-build/
-.next/
+# Scripts to ignore
+create_word_table.ps1
+test_dom.js
+debug_search.js
 
-# IDE
-.vscode/
-.idea/
-*.swp
-*.swo
+# Node
+node_modules/
+admin-ui/node_modules/
 
-# Temporary
-tmp/
-temp/
+# Private
+.env
+fb_user_data/
