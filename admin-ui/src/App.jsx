@@ -10,13 +10,16 @@ function App() {
   const [autoJoin, setAutoJoin] = useState(true);
   const [successGroups, setSuccessGroups] = useState([]);
   const [activeTab, setActiveTab] = useState('my-groups'); // 'my-groups' hoặc 'discover'
+  const [postContent, setPostContent] = useState('');
+  const [imageFolderPath, setImageFolderPath] = useState('');
   const logsEndRef = useRef(null);
 
   const API_BASE = 'http://localhost:3001/api';
 
   useEffect(() => {
     fetchGroups();
-    setupSSE();
+    const cleanup = setupSSE();
+    return cleanup;
   }, []);
 
   useEffect(() => {
@@ -42,7 +45,12 @@ function App() {
         const data = JSON.parse(event.data);
         if (data.type === 'group_found') {
           setGroups(prev => {
-            if (prev.find(g => g.url === data.group.url)) return prev;
+            const index = prev.findIndex(g => g.url === data.group.url);
+            if (index !== -1) {
+              const next = [...prev];
+              next[index] = data.group;
+              return next;
+            }
             return [...prev, data.group];
           });
         } else if (data.type === 'group_discovered') {
@@ -50,19 +58,25 @@ function App() {
             if (prev.find(g => g.url === data.group.url)) return prev;
             return [...prev, data.group];
           });
-        } else {
-            setLogs((prev) => [...prev, data]);
         }
         
         if (data.type === 'success' && data.groupUrl) {
           setSuccessGroups(prev => [...new Set([...prev, data.groupUrl])]);
           setGroups(prev => prev.filter(g => g.url !== data.groupUrl));
         }
-        
+
         if (data.type === 'done') {
-          setIsPosting(false);
-          setIsDiscovering(false);
+          if (data.source === 'posting') setIsPosting(false);
+          if (data.source === 'discovery') setIsDiscovering(false);
         }
+        
+        // Gắn nhãn cho log dựa trên source
+        let logMessage = data.message;
+        if (data.source === 'posting') logMessage = `[POST] ${logMessage}`;
+        else if (data.source === 'discovery') logMessage = `[DISC] ${logMessage}`;
+        else if (data.source === 'scanning') logMessage = `[SCAN] ${logMessage}`;
+        
+        setLogs((prev) => [...prev, { ...data, message: logMessage }]);
       } catch (e) {
         console.error('SSE Pare Error', e);
       }
@@ -129,10 +143,14 @@ function App() {
     setIsPosting(true);
     setLogs([]);
     try {
-      const req = await fetch(`${API_BASE}/post`, {
+      await fetch(`${API_BASE}/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groups: groupList })
+        body: JSON.stringify({ 
+          groups: groupList,
+          postContent,
+          imageFolderPath
+        })
       });
       const res = await req.json();
       if (!res.success) {
@@ -168,42 +186,76 @@ function App() {
           <h1 className="text-3xl font-extrabold text-blue-600 tracking-tight">PostBot 5.0</h1>
           <p className="text-sm text-gray-500 mt-1">Hệ thống Facebook Automation Chuyên Nghiệp</p>
         </div>
-        <div className="flex gap-3">
-           <button 
-                onClick={triggerFetchMyGroups}
-                className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg shadow-sm hover:bg-gray-50 transition-all font-medium text-sm flex items-center gap-2"
-            >
-                👥 Quét nhóm của tôi
-            </button>
-            <div className="flex items-center gap-2 mr-2">
-                <input 
-                    type="checkbox" 
-                    id="auto-join" 
-                    checked={autoJoin} 
-                    onChange={(e) => setAutoJoin(e.target.checked)} 
-                    className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
-                />
-                <label htmlFor="auto-join" className="text-xs font-bold text-gray-600 cursor-pointer select-none">TỰ ĐỘNG GIA NHẬP</label>
+        <div className="flex flex-col gap-2">
+            <div className="flex gap-3 justify-end">
+                <button 
+                    onClick={triggerFetchMyGroups}
+                    className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg shadow-sm hover:bg-gray-50 transition-all font-medium text-sm flex items-center gap-2"
+                >
+                    👥 Quét nhóm của tôi
+                </button>
+                <div className="flex items-center gap-2 mr-2">
+                    <input 
+                        type="checkbox" 
+                        id="auto-join" 
+                        checked={autoJoin} 
+                        onChange={(e) => setAutoJoin(e.target.checked)} 
+                        className="w-4 h-4 text-blue-600 bg-gray-100 border-gray-300 rounded focus:ring-blue-500"
+                    />
+                    <label htmlFor="auto-join" className="text-xs font-bold text-gray-600 cursor-pointer select-none">TỰ ĐỘNG GIA NHẬP</label>
+                </div>
+                <button 
+                    onClick={triggerDiscoverGroups}
+                    className="px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shadow-sm hover:bg-blue-100 transition-all font-medium text-sm flex items-center gap-2"
+                >
+                    🔍 Khám phá nhóm mới
+                </button>
             </div>
-            <button 
-                onClick={triggerDiscoverGroups}
-                className="px-4 py-2 bg-blue-50 border border-blue-200 text-blue-700 rounded-lg shadow-sm hover:bg-blue-100 transition-all font-medium text-sm flex items-center gap-2"
-            >
-                🔍 Khám phá nhóm mới
-            </button>
-            <button 
-                onClick={handleStartPosting}
-                disabled={isPosting || selectedGroups.size === 0}
-                className={`px-6 py-2 rounded-lg shadow-md font-bold text-white transition-all ${
-                isPosting || selectedGroups.size === 0 
-                    ? 'bg-gray-400 cursor-not-allowed' 
-                    : 'bg-blue-600 hover:bg-blue-700 hover:shadow-lg active:scale-95'
-                }`}
-            >
-                {isPosting ? '⏳ ĐANG ĐĂNG BÀI...' : '🚀 BẮT ĐẦU ĐĂNG'}
-            </button>
+            <div className="flex gap-3 justify-end items-center">
+                <button 
+                    onClick={handleStartPosting}
+                    disabled={isPosting || selectedGroups.size === 0}
+                    className={`px-8 py-2 rounded-lg shadow-md font-bold text-white transition-all ${
+                    isPosting || selectedGroups.size === 0 
+                        ? 'bg-gray-400 cursor-not-allowed' 
+                        : 'bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-700 hover:to-indigo-700 hover:shadow-lg active:scale-95'
+                    }`}
+                >
+                    {isPosting ? '⏳ ĐANG ĐĂNG BÀI...' : '🚀 BẮT ĐẦU ĐĂNG'}
+                </button>
+            </div>
         </div>
       </header>
+
+      {/* CẤU HÌNH BÀI VIẾT */}
+      <section className="mb-6 bg-white p-4 rounded-xl shadow-sm border border-gray-200 grid grid-cols-12 gap-6">
+        <div className="col-span-8 flex flex-col gap-2">
+            <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Nội dung bài viết (Dùng file nội dung nếu để trống)</label>
+            <textarea 
+                value={postContent}
+                onChange={(e) => setPostContent(e.target.value)}
+                placeholder="Nhập nội dung bài viết tại đây..."
+                className="w-full h-24 p-3 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent text-sm resize-none"
+            />
+        </div>
+        <div className="col-span-4 flex flex-col gap-4">
+            <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Thư mục hình ảnh</label>
+                <input 
+                    type="text"
+                    value={imageFolderPath}
+                    onChange={(e) => setImageFolderPath(e.target.value)}
+                    placeholder="Ví dụ: C:\Users\Admin\Desktop\HinhAnh"
+                    className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+            </div>
+            <div className="bg-blue-50 p-3 rounded-lg border border-blue-100">
+                <p className="text-[11px] text-blue-700 leading-relaxed font-medium">
+                    💡 <strong>Tips:</strong> Bốt sẽ tự động lấy tất cả các ảnh (.jpg, .png...) trong thư mục này để đăng kèm bài viết.
+                </p>
+            </div>
+        </div>
+      </section>
 
       <main className="flex-1 grid grid-cols-12 gap-6 h-full pb-6 overflow-hidden">
         
@@ -243,12 +295,28 @@ function App() {
                         >
                             <input type="checkbox" checked={selectedGroups.has(g.url)} disabled={isRecent} readOnly className="mt-1" />
                             <div className="min-w-0 flex-1">
-                                <p className="font-bold text-sm truncate">{g.name}</p>
-                                <div className="flex gap-2 text-[10px] mt-1 text-gray-500">
-                                    {g.members && <span className="text-blue-600">{g.members}</span>}
-                                    {g.lastActive && <span>{g.lastActive}</span>}
+                                <div className="flex justify-between items-start">
+                                    <p className="font-bold text-sm truncate pr-2">{g.name}</p>
+                                    <a 
+                                        href={g.url} 
+                                        target="_blank" 
+                                        rel="noreferrer" 
+                                        onClick={(e) => e.stopPropagation()}
+                                        className="text-blue-500 hover:underline text-[10px] shrink-0 font-medium bg-blue-50 px-2 py-0.5 rounded border border-blue-100"
+                                    >
+                                        🌐 XEM
+                                    </a>
                                 </div>
-                                {g.postedTime && <p className="text-[10px] text-orange-600 mt-0.5 font-medium">Lần cuối: {new Date(g.postedTime).toLocaleDateString()}</p>}
+                                <div className="flex gap-2 text-[10px] mt-1 text-gray-500">
+                                    {g.members && <span className="text-blue-600 font-semibold">👥 {g.members}</span>}
+                                    {g.lastPostStatus && (
+                                        <span className={`font-medium ${g.lastPostStatus === 'Không có bài viết' ? 'text-red-500' : 'text-green-600'}`}>
+                                            📝 {g.lastPostStatus}
+                                        </span>
+                                    )}
+                                </div>
+                                {g.lastPost && <p className="text-[10px] text-orange-600 mt-0.5 font-medium italic">Gần nhất: {g.lastPost}</p>}
+                                {g.postedTime && !g.lastPost && <p className="text-[10px] text-orange-600 mt-0.5 font-medium italic">Vừa đăng: {new Date(g.postedTime).toLocaleDateString()}</p>}
                             </div>
                         </div>
                       )

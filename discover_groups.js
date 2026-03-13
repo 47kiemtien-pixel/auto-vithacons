@@ -109,7 +109,7 @@ async function execJoinGroup(context, groupUrl, logCallback = () => {}) {
     try {
         logCallback(`[AutoJoin] Đang truy cập nhóm để tham gia: ${groupUrl}`);
         await page.goto(groupUrl, { waitUntil: 'domcontentloaded', timeout: 30000 });
-        await page.waitForTimeout(3000);
+        await page.waitForTimeout(1000);
 
         const joinButtonSelectors = [
             'div[aria-label="Tham gia nhóm"]',
@@ -148,7 +148,7 @@ async function execJoinGroup(context, groupUrl, logCallback = () => {}) {
         }
 
         if (joined) {
-            await page.waitForTimeout(3000);
+            await page.waitForTimeout(1000);
             // Có thể có câu hỏi gia nhập
             const hasQuestions = await page.evaluate(() => {
                 return document.body.innerText.includes('Câu hỏi gia nhập') || document.body.innerText.includes('Membership Questions');

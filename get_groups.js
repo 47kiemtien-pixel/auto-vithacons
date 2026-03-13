@@ -1,190 +1,134 @@
 const { chromium } = require('playwright');
-const path = require('path');
 const fs = require('fs');
 
-async function execGetGroups(context, keyword, logCallback = () => {}) {
-    const page = await context.newPage();
-    const page2 = await context.newPage(); // Tab 2 để soi thành viên
+async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
+    logCallback('[FB] Đang khởi tạo bộ quét Tìm kiếm thông minh...');
     
+    const page = await primaryContext.newPage();
+    const allGroups = new Map();
+    const userIdToCheck = '100063596562296';
+
     try {
-        logCallback('[FB] Đang truy cập trang danh sách nhóm đã tham gia...');
-        await page.goto('https://www.facebook.com/groups/joins/');
-        
-        let keywordLower = keyword ? keyword.toLowerCase() : '';
-        const historyPath = path.join(__dirname, 'posted_history.txt');
-        const postedGroups = new Map();
-        if (fs.existsSync(historyPath)) {
-            const lines = fs.readFileSync(historyPath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l.length > 0);
-            for (const line of lines) {
-                const parts = line.split('|');
-                const url = parts[0];
-                const timestamp = parts.length > 1 ? parseInt(parts[1], 10) : 0;
-                if (!postedGroups.has(url) || postedGroups.get(url) < timestamp) {
-                    postedGroups.set(url, timestamp);
-                }
-            }
-        }
-        const SEVEN_DAYS_MS = 7 * 24 * 60 * 60 * 1000;
-        const now = Date.now();
+        const filterParam = 'eyJycF9hdXRob3I6MCI6IntcIm5hbWVcIjpcIm15_2dyb3Vwc19hbmRfcGFnZXNfcG9zdHNcIixcImFyZ3NcIjpcIlwifSJ9';
+        const searchUrl = `https://www.facebook.com/search/posts?q=${encodeURIComponent(keyword)}&filters=${filterParam}`;
 
-        logCallback('[FB] Đang cuộn trang để tải thêm danh sách nhóm (mất khoảng 30-40 giây)...');
-        
-        let previousHeight = 0;
-        let scrollAttempts = 0;
-        const seenUrls = new Set();
-        const finalGroups = [];
-        
-        while (scrollAttempts < 20) {
-            // Click See more nếu có
-            try {
-                const seeMoreBtns = await page.$$('div[role="button"]:has-text("Xem thêm"), div[role="button"]:has-text("See more")');
-                for (const btn of seeMoreBtns) {
-                    if (await btn.isVisible()) {
-                        await btn.click();
-                        await page.waitForTimeout(1000);
-                    }
-                }
-            } catch(e) {}
+        logCallback(`[FB] Đọc dữ liệu từ Tìm kiếm: ${keyword || 'Tất cả'}`);
+        await page.goto(searchUrl, { waitUntil: 'load', timeout: 90000 });
+        await page.waitForTimeout(8000); 
 
-            // Trích xuất các nhóm đang hiển thị trên màn hình hiện tại
-            const currentGroups = await page.evaluate(() => {
-                const links = document.querySelectorAll('a[role="link"]');
-                const result = [];
-                for (const a of links) {
-                    let url = a.href;
-                    if (!url) continue;
-                    url = url.split('?')[0]; // Bỏ các tham số theo dõi của FB
-                    if (!url.endsWith('/')) url += '/';
-                    if (url.match(/\/groups\/\d+\/$/) || url.match(/\/groups\/[a-zA-Z0-9._-]+\/$/)) {
-                        if (!url.includes('/user/') && !url.includes('/buy_sell_discussion/') && !url.includes('/about/')) {
-                             let imgTag = a.querySelector('image') || a.querySelector('img') || (a.closest('div[role="listitem"]') && a.closest('div[role="listitem"]').querySelector('image'));
-                             let avatar = imgTag ? (imgTag.getAttribute('xlink:href') || imgTag.src) : null;
-                             
-                             let rawText = (a.innerText || a.textContent || '').trim();
-                             if (!rawText && a.getAttribute('aria-label')) rawText = a.getAttribute('aria-label');
-                             
-                             let name = rawText;
-                             let members = '';
-                             let lastActive = '';
-                             
-                             let lines = rawText.split('\n').map(l => l.trim()).filter(l => l);
-                             if (lines.length > 0) {
-                                name = lines[0];
-                                for (let i = 1; i < lines.length; i++) {
-                                     let l = lines[i];
-                                     if (l.includes('Lần hoạt động gần nhất') || l.includes('vừa xong') || l.includes('trước')) {
-                                         lastActive = l;
-                                     } else if (l.includes('thành viên') || l.includes('K ')) {
-                                         members = l;
-                                     }
-                                }
-                             }
+        logCallback('[FB] Bắt đầu GIAI ĐOẠN 1: Thu thập tên và ID nhóm...');
 
-                             if (lines.length === 1) {
-                                 let text = name;
-                                 let activeIdx = text.indexOf('Lần hoạt động');
-                                 if (activeIdx !== -1) {
-                                     lastActive = text.substring(activeIdx).trim();
-                                     text = text.substring(0, activeIdx).trim();
-                                 }
-                                 let memberIdx = text.indexOf('thành viên');
-                                 if (memberIdx !== -1) {
-                                     let words = text.substring(0, memberIdx + 11).split(' ');
-                                     let memberString = words.slice(Math.max(words.length - 3, 0)).join(' ').trim();
-                                     members = memberString;
-                                     text = text.substring(0, text.indexOf(memberString)).trim();
-                                 }
-                                 name = text;
-                             }
-                             if (name) {
-                                 result.push({ url: url, name: name, avatar: avatar, members: members, lastActive: lastActive });
-                             }
+        let lastCount = 0;
+        let stagnantCount = 0;
+        const maxScrolls = 200; 
+
+        for (let i = 0; i < maxScrolls; i++) {
+            const discovered = await page.evaluate(() => {
+                const results = [];
+                const allLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
+                
+                for (const a of allLinks) {
+                    const href = a.href;
+                    if (href.includes('/user/') || href.includes('/posts/') || 
+                        href.includes('/groups/feed/') || href.includes('/groups/discover/') ||
+                        href.includes('/groups/joins/')) continue;
+
+                    const idMatch = href.match(/\/groups\/([^\/\?]+)/);
+                    if (idMatch) {
+                        const id = idMatch[1];
+                        let name = a.innerText.trim();
+                        
+                        const cleanSpan = a.querySelector('span[dir="auto"]');
+                        if (cleanSpan) {
+                            const spanText = cleanSpan.innerText.trim();
+                            if (spanText.length > 0) name = spanText;
+                        }
+
+                        // LÀM SẠCH TÊN TRỰC ĐỂ
+                        name = name
+                            .replace(/^(Chưa đọc|Mới|Gần đây|Bây giờ trong|Now in|Recent activity in|[\s\W]*)+/gi, '') // Xóa tiền tố
+                            .replace(/( có một bài viết mới| Đánh dấu là đã đọc|·)+/gi, '') // Xóa hậu tố
+                            .split('\n')[0]
+                            .split('·')[0]
+                            .split(':')[0]
+                            .trim();
+
+                        if (name.length > 2 && name.length < 150) {
+                            results.push({ id, name, url: `https://www.facebook.com/groups/${id}/` });
                         }
                     }
                 }
-                return result;
+                return results;
             });
 
-            for (let g of currentGroups) {
-                if (!seenUrls.has(g.url)) {
-                    seenUrls.add(g.url);
-                    if (["Tham gia", "Join", "Rời nhóm"].includes(g.name)) continue;
-                    if (keywordLower && !g.name.toLowerCase().includes(keywordLower)) continue;
-                    
-                    const extractGroupId = (str) => {
-                        const match = str.match(/\/groups\/([a-zA-Z0-9._-]+)/);
-                        return match ? match[1] : null;
+            for (const g of discovered) {
+                if (!allGroups.has(g.url)) {
+                    const groupData = {
+                        id: g.id,
+                        name: g.name,
+                        url: g.url,
+                        members: 'Đang check...',
+                        postedTime: null,
+                        lastPostStatus: 'Đang chờ...'
                     };
-                    const gId = extractGroupId(g.url);
-                    const matchingUrlKey = Array.from(postedGroups.keys()).find(u => {
-                        const uId = extractGroupId(u);
-                        return gId && uId && gId === uId;
-                    });
-                    
-                    if (matchingUrlKey) {
-                        g.postedTime = postedGroups.get(matchingUrlKey);
-                    } else {
-                        g.postedTime = null;
-                    }
-                    
-                    try {
-                        await page2.goto(g.url + 'about/', { waitUntil: 'domcontentloaded', timeout: 20000 });
-                        await page2.waitForTimeout(2000);
-                        const memberCount = await page2.evaluate(() => {
-                            const nodes = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-                            let n;
-                            while(n = nodes.nextNode()) {
-                                let t = n.textContent.trim();
-                                if(t.includes('thành viên') && (t.match(/\d+/) || t.includes('K '))) return t;
-                            }
-                            return '';
-                        });
-                        if (memberCount) g.members = memberCount;
-                    } catch(e) {}
-
-                    const fbUserId = process.env.FB_USER_ID;
-                    if (fbUserId && !g.postedTime) {
-                        try {
-                            const userUrl = g.url + 'user/' + fbUserId + '/';
-                            await page2.goto(userUrl, { waitUntil: 'domcontentloaded', timeout: 20000 });
-                            await page2.waitForTimeout(2000);
-                            const pageText = await page2.evaluate(() => document.body.innerText);
-                            const hasNoPosts = pageText.includes('chưa đăng') || pageText.includes('Không có bài viết') || pageText.includes('chưa có bài viết');
-                            if (!hasNoPosts && pageText.includes('Bình luận')) {
-                                g.postedTime = Date.now() - 1000;
-                            }
-                        } catch(e) {}
-                    }
-
-                    finalGroups.push(g);
-                    logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: g })}`);
+                    allGroups.set(g.url, groupData);
+                    logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: groupData })}`);
                 }
             }
 
-            await page.evaluate(() => window.scrollBy(0, document.body.scrollHeight));
-            await page.waitForTimeout(2000);
-            const newHeight = await page.evaluate(() => document.body.scrollHeight);
-            if (newHeight === previousHeight) {
-                scrollAttempts++;
+            if (allGroups.size > lastCount) {
+                lastCount = allGroups.size;
+                stagnantCount = 0;
+                logCallback(`[FB] Đã tìm thấy: ${allGroups.size} nhóm.`);
+                fs.writeFileSync('groups_data.json', JSON.stringify(Array.from(allGroups.values()), null, 2));
             } else {
-                scrollAttempts = 0;
-                previousHeight = newHeight;
+                stagnantCount++;
             }
+
+            await page.mouse.wheel(0, 3000);
+            await page.waitForTimeout(1500);
+
+            if (stagnantCount >= 20 && allGroups.size > 0) break;
         }
 
-        if (finalGroups.length > 0) {
-            fs.writeFileSync('groups_data.json', JSON.stringify(finalGroups, null, 2));
-            logCallback('\n[FB] Đã lưu danh sách nhóm vào file: groups_data.json');
-        } else {
-            logCallback('[FB] Không tìm thấy nhóm nào phù hợp.');
-            fs.writeFileSync('groups_data.json', JSON.stringify([], null, 2));
+        logCallback(`[FB] HOÀN TẤT GIAI ĐOẠN 1. Tổng: ${allGroups.size} nhóm.`);
+        
+        if (allGroups.size === 0) {
+            logCallback('[!] Không tìm thấy nhóm nào phù hợp bài viết gần đây.');
+            return;
         }
 
+        logCallback(`[FB] Bắt đầu GIAI ĐOẠN 2: Kiểm tra Chi tiết cho ${allGroups.size} nhóm...`);
+
+        const groupList = Array.from(allGroups.values());
+        for (let i = 0; i < groupList.length; i++) {
+            const group = groupList[i];
+            logCallback(`[FB] [Check ${i+1}/${groupList.length}] ${group.name}`);
+            const checkUrl = `https://www.facebook.com/groups/${group.id}/user/${userIdToCheck}/`;
+            try {
+                await page.goto(checkUrl, { waitUntil: 'load', timeout: 30000 });
+                await page.waitForTimeout(4000);
+                const details = await page.evaluate(() => {
+                    const text = document.body.innerText;
+                    const mMatch = text.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i);
+                    const noPostPatterns = ['Không có bài viết mới', 'No posts available', 'chưa đăng gì trong nhóm', 'Không tìm thấy kết quả', 'No results found'];
+                    const hasNoPost = noPostPatterns.some(p => text.includes(p));
+                    return {
+                        members: mMatch ? mMatch[0] : 'N/A',
+                        status: hasNoPost ? 'Không có bài viết' : 'Đã có bài'
+                    };
+                });
+                group.members = details.members;
+                group.lastPostStatus = details.status;
+                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
+                if (i % 5 === 0) fs.writeFileSync('groups_data.json', JSON.stringify(Array.from(allGroups.values()), null, 2));
+            } catch (err) { }
+        }
+        logCallback(`\n[FB] HOÀN TẤT TOÀN BỘ QUY TRÌNH!`);
     } catch (e) {
-        logCallback(`Lỗi khi quét nhóm: ${e.message}`);
+        logCallback(`Lỗi: ${e.message}`);
     } finally {
         await page.close();
-        await page2.close();
     }
 }
 

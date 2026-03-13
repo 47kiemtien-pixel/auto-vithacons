@@ -3,7 +3,7 @@ const FBAutomator = require('./fb_automator');
 const { paraphrase } = require('./paraphraser');
 const { sleep, randomDelay } = require('./scheduler');
 
-async function startPosting(targetGroups, logCallback = () => {}, browserContext = null) {
+async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '') {
     const fs = require('fs');
     const path = require('path');
     
@@ -14,20 +14,17 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
         antiLinkGroups = new Set(fs.readFileSync(antiLinkPath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l));
     }
 
-    // Đọc nội dung từ file content.txt
-    const contentPath = path.join(__dirname, 'content.txt');
-    let baseContent = '';
-    if (fs.existsSync(contentPath)) {
-        baseContent = fs.readFileSync(contentPath, 'utf-8').trim();
-    } else {
-        const err = '[Main] Lỗi: Không tìm thấy file content.txt';
-        console.error(err);
-        logCallback({ type: 'error', message: err });
-        return;
+    // Xác định nội dung bài viết
+    let baseContent = postContent ? postContent.trim() : '';
+    if (!baseContent) {
+        const contentPath = path.join(__dirname, 'content.txt');
+        if (fs.existsSync(contentPath)) {
+            baseContent = fs.readFileSync(contentPath, 'utf-8').trim();
+        }
     }
 
     if (!targetGroups || targetGroups.length === 0 || !baseContent) {
-        const err = "Lỗi: Không có danh sách nhóm hoặc file content.txt trống.";
+        const err = "Lỗi: Không có danh sách nhóm hoặc nội dung bài viết trống.";
         console.error(err);
         logCallback({ type: 'error', message: err });
         return;
@@ -41,11 +38,10 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
         logCallback({ type: 'info', message: 'Kiểm tra đăng nhập...' });
         await automator.login();
 
-        const fs = require('fs');
-        const path = require('path');
-        // Sử dụng thư mục người dùng đã chỉ định trên Desktop
+        // Xác định thư mục hình ảnh
         const os = require('os');
-        const mediaDir = path.join(os.homedir(), 'Desktop', 'Mẫu nhà 2026');
+        const mediaDir = imageFolderPath ? imageFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Mẫu nhà 2026');
+        
         let imagePaths = [];
         if (fs.existsSync(mediaDir)) {
             imagePaths = fs.readdirSync(mediaDir)
@@ -79,7 +75,7 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                 logCallback({ type: 'warning', message: `⚠️ Nhóm này CẤM LINK. Đang tự động loại bỏ các liên kết...`, groupUrl });
                 // Regex để tìm URL: http, https, .com, .vn, ...
                 const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
-                finalContent = finalContent.replace(urlRegex, '[đã lược bỏ link]');
+                finalContent = finalContent.replace(urlRegex, '');
             }
 
             try {
@@ -87,11 +83,18 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                 if (rewritten && rewritten.trim() !== "") {
                     finalContent = rewritten;
                     console.log(`[Main] Nội dung đã rewrite:\n"${finalContent}"`);
+                    logCallback({ type: 'info', message: '✨ Đã paraphrase nội dung để tránh spam.', groupUrl });
                 } else {
                     console.log('[Main] Rewrite rỗng, dùng nội dung gốc.');
                 }
             } catch (err) {
-                console.log(`[Main] Dùng nội dung gốc thay thế do paraphrase lỗi.`);
+                if (err.message === "QUOTA_EXCEEDED") {
+                    const quotaMsg = '⚠️ CẢNH BÁO: API Gemini đã hết hạn mức (Quota Exceeded). Bốt sẽ dùng nội dung gốc để đăng tiếp.';
+                    console.log(`[Main] ${quotaMsg}`);
+                    logCallback({ type: 'warning', message: quotaMsg, groupUrl });
+                } else {
+                    console.log(`[Main] Dùng nội dung gốc thay thế do paraphrase lỗi: ${err.message}`);
+                }
             }
 
             // Tiến hành đăng bài
@@ -110,15 +113,16 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                     console.log(msg);
                     logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
                 } else {
-                    const msg = `[Main] Đăng thành công! Đang đợi 90 giây để kiểm tra xem bài có bị gỡ thầm lặng không...`;
+                    const msg = `[Main] Đăng thành công! Đang đợi 10 giây để kiểm tra xem bài có bị gỡ thầm lặng không...`;
                     console.log(msg);
                     logCallback({ type: 'info', message: msg, groupUrl });
                     
-                    await sleep(90000); // Đợi 1.5 phút để FB filter link (nếu có)
+                    await sleep(10000); // Đợi 10 giây để FB filter link (nếu có)
                     
                     const removedStatus = await automator.checkRemovedContent(groupUrl);
-                    if (removedStatus === 'removed_by_link') {
-                        const retryMsg = '⚠️ PHÁT HIỆN: Bài viết vừa đăng đã bị gỡ thầm lặng do CHỨA LINK. Tiến hành đăng lại lần 2 KHÔNG KÈM LINK...';
+                    if (removedStatus === 'removed_by_link' || removedStatus === 'removed_other') {
+                        const reason = removedStatus === 'removed_by_link' ? 'do CHỨA LINK' : 'nghi ngờ vi phạm/spam';
+                        const retryMsg = `⚠️ PHÁT HIỆN: Bài viết vừa đăng đã bị gỡ thầm lặng (${reason}). Tiến hành đăng lại lần 2 KHÔNG KÈM LINK...`;
                         console.log(retryMsg);
                         logCallback({ type: 'warning', message: retryMsg, groupUrl });
 
@@ -128,9 +132,9 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                             antiLinkGroups.add(groupUrl);
                         }
 
-                        // Xử lý lại nội dung không kèm link
+                        // Xử lý lại nội dung (Xoá sạch link, không để lại văn bản thay thế)
                         const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
-                        const contentNoLink = finalContent.replace(urlRegex, '[đã lược bỏ link]');
+                        const contentNoLink = finalContent.replace(urlRegex, '');
                         
                         // Đăng lại lần 2
                         const retryResult = await automator.postToGroup(groupUrl, contentNoLink, imagePaths);
@@ -139,8 +143,6 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                         } else {
                             logCallback({ type: 'error', message: '❌ Thất bại khi cố gắng đăng lại.', groupUrl });
                         }
-                    } else if (removedStatus === 'removed_other') {
-                        logCallback({ type: 'error', message: '❌ Bài viết bị gỡ do lý do khác (Spam/Vi phạm tiêu chuẩn).', groupUrl });
                     } else {
                         logCallback({ type: 'success', message: '✅ Bài viết vẫn ổn định (Không bị gỡ).', groupUrl, status: 'published' });
                     }

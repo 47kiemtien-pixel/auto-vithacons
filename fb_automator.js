@@ -284,28 +284,75 @@ class FBAutomator {
         try {
             const removedUrl = `${groupUrl.replace(/\/$/, '')}/my_removed_content/`;
             console.log(`[FB] Đang kiểm tra nội dung bị gỡ tại: ${removedUrl}`);
-            await this.page.goto(removedUrl);
+            await this.page.goto(removedUrl, { waitUntil: 'networkidle' }).catch(() => {});
             await sleep(5000);
+            
+            // Cuộn xuống để load nội dung
+            await this.page.mouse.wheel(0, 500);
+            await sleep(2000);
+            
+            // Chụp ảnh để debug
+            await this.page.screenshot({ path: path.join(__dirname, 'debug_removed_content.png') });
 
             const pageText = await this.page.innerText('body') || '';
             
-            // Tìm kiếm các lý do liên quan đến Link hoặc Spam
-            if (pageText.includes('Nhiều người báo cáo') || 
-                pageText.includes('Liên kết') || 
-                pageText.includes('Link') || 
-                pageText.includes('vi phạm tiêu chuẩn cộng đồng') ||
-                pageText.includes('Tự động gỡ') ||
-                pageText.includes('Auto-removed')) {
+            // TRƯỜNG HỢP 1: Trang trống (Không có bài viết bị gỡ)
+            if (pageText.includes('Không có bài viết nào để hiển thị') || 
+                pageText.includes('No posts to show') ||
+                pageText.includes('No content found')) {
+                console.log('[FB] Xác nhận: Trang nội dung bị gỡ trống trơn. Không có vấn đề gì.');
+                return 'clean';
+            }
+
+            // TRƯỜNG HỢP 2: Tìm kiếm từ khóa cảnh báo trong văn bản hiển thị (innerText)
+            // Lưu ý: Không dùng page.content() vì nó quá rộng, dễ bị nhiễu bởi menu/script
+            const warningKeywords = [
+                'Nhiều người báo cáo', 'vi phạm tiêu chuẩn cộng đồng',
+                'Tự động gỡ', 'Auto-removed', 'đã bị gỡ', 'Nội dung bị gỡ',
+                'Removed content', 'Gỡ bởi', 'declined', 'denied', 'từ chối',
+                'Từ khóa', 'tiêu chí', 'đáp ứng'
+            ];
+
+            let isRemoved = false;
+            let matchedKw = '';
+            for (const kw of warningKeywords) {
+                if (pageText.toLowerCase().includes(kw.toLowerCase())) {
+                    matchedKw = kw;
+                    isRemoved = true;
+                    break;
+                }
+            }
+
+            // Riêng từ khóa "Link" hoặc "Liên kết" phải đi kèm với dấu hiệu bị gỡ để tránh nhận nhầm menu
+            if (!isRemoved) {
+                const linkKeywords = ['liên kết', 'link'];
+                const removalIndicators = ['gỡ', 'vi phạm', 'removed', 'declined', 'not approved'];
                 
-                console.log('==> [CẢNH BÁO]: Phát hiện có bài viết bị Facebook gỡ trong nhóm này.');
-                
-                if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
+                for (const lkw of linkKeywords) {
+                    if (pageText.toLowerCase().includes(lkw)) {
+                        // Kiểm tra xem có từ "gỡ" hoặc "vi phạm" ở gần đó không (trong cùng trang văn bản)
+                        for (const ind of removalIndicators) {
+                            if (pageText.toLowerCase().includes(ind)) {
+                                console.log(`[FB] Phát hiện cặp từ khóa nghi ngờ: "${lkw}" + "${ind}"`);
+                                matchedKw = `${lkw} + ${ind}`;
+                                isRemoved = true;
+                                break;
+                            }
+                        }
+                    }
+                    if (isRemoved) break;
+                }
+            }
+
+            if (isRemoved) {
+                console.log(`==> [CẢNH BÁO]: Phát hiện bài viết bị gỡ. Lý do nghi ngờ: ${matchedKw}`);
+                if (pageText.toLowerCase().includes('liên kết') || pageText.toLowerCase().includes('link')) {
                     return 'removed_by_link';
                 }
                 return 'removed_other';
             }
             
-            console.log('[FB] Không thấy bài viết nào bị gỡ gần đây.');
+            console.log('[FB] Không thấy dấu hiệu bài viết bị gỡ dựa trên văn bản hiển thị.');
             return 'clean';
         } catch (error) {
             console.error('[FB] Lỗi khi kiểm tra removed content:', error);
