@@ -3,42 +3,54 @@ const path = require('path');
 const { sleep } = require('./scheduler');
 
 class FBAutomator {
-    constructor() {
+    constructor(logCallback = () => {}) {
         this.browser = null;
         this.context = null;
         this.page = null;
         this.userDataDir = path.join(__dirname, 'fb_user_data');
+        this.logCallback = logCallback;
     }
 
     async init(externalContext) {
         if (externalContext) {
             this.context = externalContext;
-            console.log('[FB] Sử dụng context trình duyệt từ máy chủ...');
+            this.log('[FB] Sử dụng context trình duyệt từ máy chủ...');
         } else {
-            console.log('[FB] Khởi tạo trình duyệt độc lập...');
+            this.log('[FB] Khởi tạo trình duyệt độc lập...');
             this.context = await chromium.launchPersistentContext(this.userDataDir, {
+                executablePath: 'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe',
                 headless: false,
                 viewport: { width: 1280, height: 720 },
-                args: ['--disable-notifications']
+                args: ['--no-sandbox', '--disable-notifications']
             });
         }
         this.page = await this.context.newPage();
     }
 
+    log(msg) {
+        console.log(msg);
+        this.logCallback(msg);
+    }
+
     async login() {
-        console.log('[FB] Kiểm tra đăng nhập...');
+        this.log('[FB] Kiểm tra đăng nhập...');
         await this.page.goto('https://www.facebook.com');
         
         // Kiểm tra xem đã đăng nhập chưa
         const isLoggedIn = await this.page.$('[aria-label="Your profile"]') || await this.page.$('[aria-label="Trang cá nhân của bạn"]');
         
         if (!isLoggedIn) {
-            console.log('[FB] Chưa đăng nhập. Vui lòng đăng nhập thủ công trên cửa sổ trình duyệt...');
-            // Đợi người dùng đăng nhập thủ công (tối đa 5 phút)
-            await this.page.waitForSelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]', { timeout: 300000 });
-            console.log('[FB] Đăng nhập thành công!');
+            this.log('[FB] CHƯA ĐĂNG NHẬP. Vui lòng đăng nhập Facebook ngay trên cửa sổ trình duyệt Cốc Cốc vừa hiện ra...');
+            // Đợi người dùng đăng nhập thủ công (tối đa 10 phút)
+            try {
+                await this.page.waitForSelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]', { timeout: 600000 });
+                this.log('[FB] Đăng nhập thành công!');
+            } catch (e) {
+                this.log('[FB] Quá thời gian chờ đăng nhập (10 phút).');
+                throw new Error('Timeout waiting for login');
+            }
         } else {
-            console.log('[FB] Đã đăng nhập từ phiên trước.');
+            this.log('[FB] Đã đăng nhập từ phiên trước.');
         }
     }
 

@@ -3,9 +3,11 @@ const cors = require('cors');
 const fs = require('fs');
 const path = require('path');
 const { startPosting } = require('./index.js');
-const { execGetGroups } = require('./get_groups.js');
-const { execDiscoverGroups, execJoinGroup } = require('./discover_groups.js');
-const browserManager = require('./browser_manager.js');
+const { execGetGroups } = require('./get_groups.js'); // Keep this line
+const { execDiscoverGroups, execJoinGroup } = require('./discover_groups'); // Changed from .js
+const browserManager = require('./browser_manager'); // Changed from .js
+const FBAutomator = require('./fb_automator'); // Added
+const dotenv = require('dotenv'); // Added
 
 const app = express();
 app.use(cors());
@@ -43,6 +45,7 @@ app.get('/api/groups', (req, res) => {
 
 // API Quét danh sách nhóm đã tham gia từ FB
 app.post('/api/fetch-groups', async (req, res) => {
+    // Cho phép chạy song song với các tiến trình khác
     isScanning = true;
     const keyword = req.body.keyword || '';
     broadcastLog({ type: 'info', message: `Bắt đầu quét nhóm đã tham gia với từ khóa: "${keyword}"`, source: 'scanning' });
@@ -76,70 +79,14 @@ app.post('/api/fetch-groups', async (req, res) => {
 });
 
 // API Khám phá nhóm mới (Chưa tham gia)
-app.post('/api/discover-groups', async (req, res) => {
+app.post('/api/discover-groups', (req, res) => {
     const keyword = req.body.keyword || '';
-    // Xử lý kỹ cờ autoJoin từ UI
     const autoJoin = req.body.autoJoin === true || req.body.autoJoin === 'true';
     
-    console.log(`[API] Khám phá nhóm: ${keyword}, AutoJoin=${autoJoin}`);
-    broadcastLog({ type: 'info', message: `Bắt đầu khám phá nhóm: "${keyword}". Chế độ Tự động gia nhập: ${autoJoin ? 'BẬT' : 'TẮT'}`, source: 'discovery' });
+    console.log(`[API] Khởi chạy Khám phá nhóm: ${keyword}, AutoJoin=${autoJoin}`);
+    runDiscoveryProcess(keyword, autoJoin);
     
-    isDiscovering = true;
-    try {
-        const context = await browserManager.getContext();
-        execDiscoverGroups(context, keyword, (msg) => {
-            if (typeof msg === 'string') {
-                if (msg.startsWith('[FB_EVENT] ')) {
-                    try {
-                        const event = JSON.parse(msg.substring(11));
-                        broadcastLog({ ...event, source: 'discovery' });
-                    } catch(e) {}
-                } else {
-                    broadcastLog({ type: 'info', message: msg, source: 'discovery' });
-                }
-            }
-        }).then(async (groups) => {
-            if (autoJoin && groups.length > 0) {
-                const joinable = groups.filter(g => g.canJoin && !g.isJoined);
-                broadcastLog({ type: 'info', message: `[Discovery] Tìm thấy ${groups.length} nhóm. Tiến hành Join ${joinable.length} nhóm khả dụng...`, source: 'discovery' });
-                
-                if (joinable.length > 0) {
-                    for (let i = 0; i < joinable.length; i++) {
-                        const g = joinable[i];
-                        broadcastLog({ type: 'info', message: `[AutoJoin ${i+1}/${joinable.length}] Đang gia nhập: ${g.name}`, source: 'discovery' });
-                        
-                        const success = await execJoinGroup(context, g.url, (msg) => {
-                            broadcastLog({ type: 'info', message: msg, source: 'discovery' });
-                        });
-                        
-                        if (success) {
-                            broadcastLog({ type: 'group_discovered', group: { ...g, isJoined: true, canJoin: false }, source: 'discovery' });
-                        }
- 
-                        if (i < joinable.length - 1) {
-                            const delaySec = Math.floor(Math.random() * (10 - 5 + 1) + 5); // 5-10s nghỉ
-                            broadcastLog({ type: 'delay', message: `Đang tham gia CỰC NHANH... Nghỉ ${delaySec} giây tiếp theo...`, source: 'discovery' });
-                            await new Promise(r => setTimeout(r, delaySec * 1000));
-                        }
-                    }
-                    broadcastLog({ type: 'done', message: 'Đã hoàn thành tiến trình Khám phá & Tự động gia nhập nhóm.', source: 'discovery' });
-                } else {
-                    broadcastLog({ type: 'done', message: 'Đã hoàn thành khám phá nhóm. Không tìm thấy nhóm mới nào khả dụng để gia nhập.', source: 'discovery' });
-                }
-            } else {
-                broadcastLog({ type: 'done', message: `Đã hoàn thành khám phá nhóm. Tìm thấy ${groups.length} nhóm.`, source: 'discovery' });
-            }
-        }).catch(err => {
-            broadcastLog({ type: 'error', message: `Lỗi khám phá nhóm: ${err.message}`, source: 'discovery' });
-        }).finally(() => {
-            isDiscovering = false;
-        });
-        
-        res.json({ success: true, message: 'Tiến trình khám phá đang chạy ngầm...' });
-    } catch(e) {
-        isDiscovering = false;
-        res.status(500).json({ error: 'Lỗi khởi tạo', details: e.message });
-    }
+    res.json({ success: true, message: 'Tiến trình khám phá đã bắt đầu và đang chạy ngầm...' });
 });
 
 // API Gia nhập nhóm
@@ -170,6 +117,7 @@ app.post('/api/post', async (req, res) => {
         return res.status(400).json({ error: 'Vui lòng cung cấp danh sách nhóm cần đăng.' });
     }
 
+    // Cho phép chạy song song với Discovery/Scanning
     isPosting = true;
     res.json({ success: true, message: 'Đã bắt đầu tiến trình đăng bài' });
     broadcastLog({ type: 'start', message: `Tiến trình đăng bài bắt đầu với ${groups.length} nhóm`, source: 'posting' });
@@ -213,6 +161,84 @@ app.get('/api/logs', (req, res) => {
     });
 });
 
+// --- TỰ ĐỘNG KHÁM PHÁ (AUTO-DISCOVERY) ---
+// Chạy ngầm mỗi 2 giờ nếu được bật
+let autoDiscoveryInterval = null;
+function startAutoDiscovery() {
+    if (autoDiscoveryInterval) return;
+    console.log('[AutoDisc] Khởi tạo luồng Tự động khám phá (lặp lại sau 2 giờ)...');
+    autoDiscoveryInterval = setInterval(() => {
+        if (!isDiscovering) { // Chỉ kiểm tra nếu chưa có Discovery nào khác ĐANG CHẠY. Có thể chạy cùng lúc với Posting.
+            const defaultKeyword = 'việc làm thiết kế nội thất'; // Có thể lấy từ config
+            console.log(`[AutoDisc] Đang tự động chạy khám phá với từ khóa: ${defaultKeyword}`);
+            runDiscoveryProcess(defaultKeyword, true); 
+        }
+    }, 2 * 60 * 60 * 1000); 
+}
+
+// Hàm chạy discovery tập trung để dùng chung cho API và Auto
+async function runDiscoveryProcess(keyword, autoJoin = false) {
+    if (isDiscovering) return;
+    isDiscovering = true;
+    broadcastLog({ type: 'info', message: `🔍 Bắt đầu tiến trình khám phá nhóm: "${keyword}"`, source: 'discovery' });
+    
+    try {
+        console.log(`[Server] Đang kiểm tra đăng nhập trước khi khám phá...`);
+        const context = await browserManager.getContext();
+        
+        // Đảm bảo người dùng đã đăng nhập
+        const automator = new FBAutomator((msg) => {
+            broadcastLog({ type: 'info', message: msg, source: 'discovery' });
+        });
+        await automator.init(context);
+        await automator.login(); // Đợi đăng nhập tối đa 10 phút
+        
+        const groups = await execDiscoverGroups(context, keyword, (msg) => {
+            console.log(`[Discovery Log] ${msg}`);
+            if (typeof msg === 'string') {
+                if (msg.startsWith('[FB_EVENT] ')) {
+                    try {
+                        const event = JSON.parse(msg.substring(11));
+                        broadcastLog({ ...event, source: 'discovery' });
+                    } catch(e) {}
+                } else {
+                    broadcastLog({ type: 'info', message: msg, source: 'discovery' });
+                }
+            }
+        });
+
+        if (autoJoin && groups.length > 0) {
+            const joinable = groups.filter(g => g.canJoin && !g.isJoined);
+            broadcastLog({ type: 'info', message: `[Discovery] Tìm thấy ${groups.length} nhóm. Tiến hành Tham gia ${joinable.length} nhóm...`, source: 'discovery' });
+            
+            for (let i = 0; i < joinable.length; i++) {
+                const g = joinable[i];
+                broadcastLog({ type: 'info', message: `[Discovery] Đang tham gia nhóm (${i+1}/${joinable.length}): ${g.name}`, source: 'discovery' });
+                const success = await execJoinGroup(context, g.url, (msg) => {
+                    broadcastLog({ type: 'info', message: msg, source: 'discovery' });
+                });
+                
+                if (success) {
+                    broadcastLog({ type: 'group_discovered', group: { ...g, isJoined: true, canJoin: false }, source: 'discovery' });
+                }
+
+                if (i < joinable.length - 1) {
+                    const delaySec = Math.floor(Math.random() * (10 - 5 + 1) + 5);
+                    await new Promise(r => setTimeout(r, delaySec * 1000));
+                }
+            }
+        }
+        broadcastLog({ type: 'done', message: 'Hoàn thành tiến trình khám phá.', source: 'discovery' });
+    } catch (err) {
+        console.error('[Discovery Error]', err);
+        broadcastLog({ type: 'error', message: `Lỗi khám phá: ${err.message}`, source: 'discovery' });
+    } finally {
+        isDiscovering = false;
+    }
+}
+
 app.listen(PORT, () => {
     console.log(`[Server] API đang chạy tại http://localhost:${PORT}`);
+    // Kích hoạt tự động khám phá khi khởi động server
+    startAutoDiscovery();
 });

@@ -187,7 +187,7 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
         logCallback({ type: 'error', message: `Lỗi hệ thống: ${error.message}` });
     } finally {
         // Chỉ đóng trang hiện tại, không đóng context dùng chung
-        await automator.close();
+        // await automator.close(); // Giữ tab lại theo yêu cầu người dùng
     }
 }
 

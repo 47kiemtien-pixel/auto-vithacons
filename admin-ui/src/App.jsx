@@ -171,7 +171,7 @@ function App() {
   };
 
   const toggleAll = () => {
-    const availableGroups = groups.filter(g => !(g.postedTime && (Date.now() - g.postedTime < 7 * 24 * 60 * 60 * 1000)));
+    const availableGroups = groups.filter(g => g.isSelectable !== false);
     if (selectedGroups.size === availableGroups.length && availableGroups.length > 0) {
       setSelectedGroups(new Set());
     } else {
@@ -286,7 +286,7 @@ function App() {
                    {groups.length === 0 ? (
                       <div className="text-center text-gray-400 mt-10 text-sm italic">Chưa có dữ liệu nhóm đã tham gia.</div>
                    ) : groups.map(g => {
-                      const isRecent = g.postedTime && (Date.now() - g.postedTime < 7 * 24 * 60 * 60 * 1000);
+                      const isRecent = g.isSelectable === false;
                       return (
                         <div 
                             key={g.url} 

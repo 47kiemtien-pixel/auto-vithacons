@@ -4,67 +4,80 @@ const fs = require('fs');
 async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
     const page = await context.newPage();
     try {
-        const url = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(keyword)}`;
-        logCallback(`[Discovery] Đang tìm kiếm nhóm với từ khóa: "${keyword}"...`);
+        // Sử dụng ngoặc kép để Facebook tìm chính xác cụm từ (Exact Match)
+        const exactKeyword = `"${keyword}"`;
+        const url = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(exactKeyword)}`;
+        logCallback(`[Discovery] Bắt đầu điều hướng tới (Tìm chính xác): ${url}`);
         
-        await page.goto(url, { waitUntil: 'networkidle', timeout: 60000 });
-        await page.waitForTimeout(5000);
+        await page.goto(url, { waitUntil: 'load', timeout: 90000 });
+        logCallback('[Discovery] Đã tải xong trang tìm kiếm. Đợi dữ liệu render...');
+        await page.waitForTimeout(7000);
 
-        // Cuộn trang một chút để tải thêm kết quả
-        logCallback('[Discovery] Đang cuộn trang để lấy thêm kết quả...');
+        // Cuộn trang để tải thêm kết quả
+        logCallback('[Discovery] Đang cuộn trang (3 lần) để lấy thêm nhóm...');
         for (let i = 0; i < 3; i++) {
-            await page.evaluate(() => window.scrollBy(0, 1000));
-            await page.waitForTimeout(2000);
+            await page.evaluate(() => window.scrollBy(0, 1500));
+            await page.waitForTimeout(2500);
         }
 
-        const groups = await page.evaluate(() => {
+        logCallback('[Discovery] Đang trích xuất dữ liệu nhóm từ DOM...');
+        const groups = await page.evaluate((kw) => {
             const results = [];
-            const items = document.querySelectorAll('div[role="article"], div[role="listitem"]');
-            
-            items.forEach(item => {
-                const link = item.querySelector('a[href*="/groups/"]');
-                if (link && link.href) {
-                    let fullUrl = link.href.split('?')[0];
-                    if (!fullUrl.endsWith('/')) fullUrl += '/';
-                    
-                    // Tránh lấy lại link tab search
-                    if (fullUrl.includes('/search/')) return;
+            // FB Search Groups thường nằm trong các div có role="article" hoặc cấu trúc lồng nhau phức tạp
+            // Chúng ta tìm tất cả các block có chứa link group
+            const allLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
+            const processedUrls = new Set();
+            const lowerKw = kw.toLowerCase();
 
-                    const text = item.innerText || '';
+            allLinks.forEach(link => {
+                let fullUrl = link.href.split('?')[0];
+                if (!fullUrl.endsWith('/')) fullUrl += '/';
+                
+                // Bỏ qua link không phải group info (search, profile, etc.)
+                if (fullUrl.includes('/search/') || processedUrls.has(fullUrl)) return;
+
+                // Tìm container cha chứa cả tên và nút
+                let container = link.closest('div[role="article"]') || 
+                                link.closest('div[role="listitem"]') ||
+                                link.parentElement?.closest('div.x1yzt60o'); 
+
+                if (container) {
+                    const text = container.innerText || '';
                     const lines = text.split('\n').filter(l => l.trim());
                     
-                    if (lines.length >= 2) {
+                    if (lines.length >= 1) {
                         const name = lines[0];
-                        const info = lines[1]; // Vd: "Công khai · 141K thành viên"
                         
-                        // Kiểm tra trạng thái Join
+                        // LỌC NGHIÊM NGẶT: Tên phải chứa đúng cụm từ người dùng nhập
+                        if (!name.toLowerCase().includes(lowerKw)) {
+                            return; 
+                        }
+                        const info = lines.find(l => l.includes('thành viên') || l.includes('members')) || '';
+                        
+                        // Tìm nút Tham gia
                         let joinBtnFound = false;
-                        const buttons = item.querySelectorAll('[role="button"]');
+                        const buttons = container.querySelectorAll('div[role="button"], [role="button"]');
                         for (const btn of buttons) {
                             const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
-                            const btnText = (btn.innerText || '').trim();
+                            const btnText = (btn.innerText || '').trim().toLowerCase();
                             
-                            // Dựa trên DOM thực tế: aria-label="Tham gia nhóm [Tên nhóm]"
-                            if (ariaLabel.startsWith('tham gia nhóm') || 
-                                ariaLabel.startsWith('join group') || 
-                                btnText === 'Tham gia' || 
-                                btnText === 'Join' ||
-                                btnText === 'Tham gia nhóm' ||
-                                btnText === 'Join Group') {
+                            if (ariaLabel.includes('tham gia nhóm') || 
+                                ariaLabel.includes('join group') || 
+                                btnText === 'tham gia' || 
+                                btnText === 'join') {
                                 joinBtnFound = true;
                                 break;
                             }
                         }
                         
-                        // Nếu text chứa "Đã tham gia" hoặc "Joined" thì bỏ qua
                         const textLower = text.toLowerCase();
                         const isJoined = textLower.includes('đã tham gia') || 
                                          textLower.includes('joined') || 
                                          textLower.includes('đã gửi yêu cầu') || 
                                          textLower.includes('requested') || 
-                                         textLower.includes('pending') || 
                                          textLower.includes('đang chờ');
 
+                        processedUrls.add(fullUrl);
                         results.push({
                             name: name,
                             url: fullUrl,
@@ -75,20 +88,10 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                     }
                 }
             });
-            
-            // Lọc trùng
-            const unique = [];
-            const map = new Map();
-            for (const item of results) {
-                if (!map.has(item.url)) {
-                    map.set(item.url, true);
-                    unique.push(item);
-                }
-            }
-            return unique;
-        });
+            return results;
+        }, keyword);
 
-        logCallback(`[Discovery] Tìm thấy ${groups.length} nhóm tiềm năng.`);
+        logCallback(`[Discovery] Phân tích xong. Tìm thấy ${groups.length} nhóm.`);
         
         // Phát sự kiện từng nhóm tìm được
         for (const g of groups) {
