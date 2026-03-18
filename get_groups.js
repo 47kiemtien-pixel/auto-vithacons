@@ -120,6 +120,12 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                 
                 const details = await detailPage.evaluate(() => {
                     const text = document.body.innerText;
+                    
+                    // Phát hiện trang bị chặn/không hiển thị
+                    if (text.includes('Trang này không hiển thị') || text.includes('This content isn\'t available right now')) {
+                        return { error: 'blocked' };
+                    }
+
                     const mMatch = text.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i);
                     const timeLinks = Array.from(document.querySelectorAll('a[role="link"]'))
                         .filter(a => a.href.includes('/posts/') && a.innerText.length > 0)
@@ -136,7 +142,14 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                     };
                 });
 
-                group.members = details.members;
+                if (details.error === 'blocked') {
+                    logCallback(`[!] PHÁT HIỆN FACEBOOK CHẶN TRUY CẬP TRANG NÀY. Dừng worker để bảo vệ tài khoản.`);
+                    group.lastPostStatus = "Bị chặn (Thử lại sau)";
+                    isScanningDone = true; // Dừng các lượt quét tiếp theo
+                    return;
+                }
+
+                group.members = details.members || group.members;
                 if (!details.postedTimeStr || details.status === 'Chưa đăng') {
                     group.postedTime = null;
                     group.isSelectable = true;
@@ -171,8 +184,8 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                 logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
             }
 
-            // Nghỉ an toàn ngẫu nhiên 5-10 giây giữa các lần check nhóm
-            const delay = Math.floor(Math.random() * 5000) + 5000;
+            // Nghỉ an toàn ngẫu nhiên 10-20 giây giữa các lần check nhóm để tránh SPAM block
+            const delay = Math.floor(Math.random() * 10000) + 10000;
             logCallback(`[FB] Nghỉ an toàn ${Math.floor(delay/1000)}s tiếp theo...`);
             await new Promise(r => setTimeout(r, delay));
         }
@@ -204,8 +217,13 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
         for (let i = 0; i < maxScrollAttempts; i++) {
             const discovered = await page.evaluate((kw) => {
                 const results = [];
-                const items = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
-                for (const a of items) {
+                // Lấy tất cả listitem để bóc tách thông tin đi kèm
+                const listItems = Array.from(document.querySelectorAll('div[role="listitem"]'));
+                
+                for (const item of listItems) {
+                    const a = item.querySelector('a[href*="/groups/"]');
+                    if (!a) continue;
+                    
                     const href = a.href;
                     if (href.includes('/user/') || href.includes('/posts/') || 
                         href.includes('/groups/feed/') || href.includes('/groups/discover/') ||
@@ -215,16 +233,26 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                     const idMatch = href.match(/\/groups\/(\d+)\/?/) || href.match(/\/groups\/([^\/\?]+)/);
                     if (idMatch) {
                         const id = idMatch[1];
-                        const nameEl = a.querySelector('span[dir="auto"]') || 
-                                     a.closest('div[role="listitem"]')?.querySelector('span[dir="auto"]') || a;
+                        const nameEl = a.querySelector('span[dir="auto"]') || a;
                         const name = nameEl.innerText.trim();
+                        
                         if (name.toLowerCase() === 'xem nhóm' || name.toLowerCase() === 'view group' || 
                             name.toLowerCase() === 'tham gia nhóm' || name.toLowerCase() === 'join group') continue;
                         
                         // LỌC CHÍNH XÁC: Tên phải chứa cụm từ người dùng nhập
                         if (kw && !name.toLowerCase().includes(kw.toLowerCase())) continue;
+                        
                         if (name.length > 2 && name.length < 150) {
-                            results.push({ id, name, url: `https://www.facebook.com/groups/${id}/` });
+                            // Bóc tách số lượng thành viên từ text của item
+                            const itemText = item.innerText;
+                            const mMatch = itemText.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i);
+                            
+                            results.push({ 
+                                id, 
+                                name, 
+                                url: `https://www.facebook.com/groups/${id}/`,
+                                members: mMatch ? mMatch[0] : 'N/A'
+                            });
                         }
                     }
                 }
@@ -237,7 +265,7 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                         id: g.id,
                         name: g.name,
                         url: g.url,
-                        members: 'Đang check...',
+                        members: g.members || 'N/A',
                         postedTime: null,
                         lastPostStatus: 'Đang xếp hàng...',
                         isSelectable: false
