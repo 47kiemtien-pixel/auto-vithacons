@@ -1,4 +1,5 @@
 const fs = require('fs');
+const path = require('path');
 
 function parseFBTime(timeStr) {
     if (!timeStr) return null;
@@ -45,6 +46,19 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
     const groupQueue = [];
     let isScanningDone = false;
 
+    // --- Đọc lịch sử đăng bài cục bộ ---
+    const historyPath = path.join(__dirname, 'posted_history.txt');
+    const localHistory = new Map(); // url -> timestamp
+    if (fs.existsSync(historyPath)) {
+        const lines = fs.readFileSync(historyPath, 'utf-8').split('\n');
+        for (const line of lines) {
+            const [url, ts] = line.split('|');
+            if (url && ts) {
+                localHistory.set(url.trim(), parseInt(ts));
+            }
+        }
+    }
+
     // --- Lấy User ID của chính mình ---
     try {
         logCallback('[FB] Đang xác định User ID của bạn...');
@@ -76,6 +90,19 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
             const group = groupQueue.shift();
             logCallback(`[FB] [Worker] Đang kiểm tra chi tiết: ${group.name}`);
             
+            // KIỂM TRA LỊCH SỬ CỤC BỘ TRƯỚC
+            const lastPostTs = localHistory.get(group.url);
+            const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
+            
+            if (lastPostTs && lastPostTs > oneDayAgo) {
+                logCallback(`[FB] [Worker] Nhóm ${group.name} đã có trong lịch sử đăng (vừa mới đăng).`);
+                group.isSelectable = false;
+                group.lastPostStatus = "Đã đăng (Lịch sử)";
+                group.postedTime = lastPostTs;
+                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
+                continue;
+            }
+
             const checkUrl = `https://www.facebook.com/groups/${group.id}/user/${userIdToCheck}/`;
             try {
                 // Sử dụng domcontentloaded để nhanh hơn và timeout dài hơn

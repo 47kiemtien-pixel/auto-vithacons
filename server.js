@@ -126,6 +126,11 @@ app.post('/api/post', async (req, res) => {
         const context = await browserManager.getContext();
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });
+            
+            // Nếu đăng thành công, cập nhật trạng thái ngay lập tức vào file và danh sách hiện tại
+            if (event.type === 'success' && event.groupUrl) {
+                updateGroupStatusLocally(event.groupUrl, event.status === 'pending' ? 'Chờ phê duyệt' : 'Đã đăng');
+            }
         }, context, postContent, imageFolderPath);
     } catch (e) {
         broadcastLog({ type: 'error', message: `Lỗi nội bộ: ${e.message}`, source: 'posting' });
@@ -134,6 +139,36 @@ app.post('/api/post', async (req, res) => {
         broadcastLog({ type: 'done', message: 'Tất cả tiến trình đã kết thúc.', source: 'posting' });
     }
 });
+
+// Hàm cập nhật trạng thái nhóm cục bộ mà không cần quét lại
+function updateGroupStatusLocally(groupUrl, statusText) {
+    const dataPath = path.join(__dirname, 'groups_data.json');
+    if (fs.existsSync(dataPath)) {
+        try {
+            let data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
+            let found = false;
+            data = data.map(g => {
+                if (g.url === groupUrl) {
+                    g.isSelectable = false;
+                    g.lastPostStatus = statusText;
+                    found = true;
+                }
+                return g;
+            });
+            if (found) {
+                fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
+                // Thông báo cho UI cập nhật dòng đó ngay lập tức
+                broadcastLog({ 
+                    type: 'group_found', 
+                    group: data.find(g => g.url === groupUrl), 
+                    source: 'scanning' // UI thường nghe source này để cập nhật list
+                });
+            }
+        } catch (e) {
+            console.error('[Server] Lỗi cập nhật status cục bộ:', e);
+        }
+    }
+}
 
 // Broadcast sự kiện tới toàn bộ client SSE
 function broadcastLog(event) {
