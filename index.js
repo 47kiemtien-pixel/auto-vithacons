@@ -4,7 +4,7 @@ const { paraphrase } = require('./paraphraser');
 const { sleep, randomDelay } = require('./scheduler');
 
 const PARAPHRASE_TIMEOUT_MS = 5000;
-const QUICK_POST_VERIFY_DELAY_MS = 1500;
+const QUICK_POST_VERIFY_DELAY_MS = 10000;
 const FAST_GROUP_DELAY_MIN_MS = 15000;
 const FAST_GROUP_DELAY_MAX_MS = 30000;
 

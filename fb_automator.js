@@ -886,7 +886,9 @@ class FBAutomator {
                 if (postStatus === 'rejected_link') return { success: false, pending: false, reason: 'rejected_link' };
                 if (postStatus === 'rejected_other') return { success: false, pending: false, reason: 'rejected_other' };
 
-                await sleep(2000);
+                this.log('[FB] Cho Facebook on dinh sau khi dong composer...');
+                await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
+                await sleep(6000);
                 
                 let isPending = false;
                 try {
@@ -944,29 +946,54 @@ class FBAutomator {
     async checkRemovedContent(groupUrl) {
         try {
             const removedUrl = `${groupUrl.replace(/\/$/, '')}/my_removed_content/`;
-            console.log(`[FB] Äang kiá»ƒm tra ná»™i dung bá»‹ gá»¡ táº¡i: ${removedUrl}`);
+            this.log(`[FB] Dang kiem tra noi dung bi go tai: ${removedUrl}`);
             await this.page.goto(removedUrl, { waitUntil: 'networkidle' }).catch(() => {});
-            await sleep(5000);
+            await sleep(2500);
             
-            // Cuá»™n xuá»‘ng Ä‘á»ƒ load ná»™i dung
             await this.page.mouse.wheel(0, 500);
-            await sleep(2000);
+            await sleep(1000);
             
-            // Chá»¥p áº£nh Ä‘á»ƒ debug
             await this.page.screenshot({ path: path.join(__dirname, 'debug_removed_content.png') });
 
             const pageText = await this.page.innerText('body') || '';
+            const removedMeta = await this.page.evaluate(() => {
+                const articleCount = document.querySelectorAll('div[role="article"]').length;
+                const feedArticleCount = document.querySelectorAll('div[role="feed"] div[role="article"], div[role="main"] div[role="article"]').length;
+                const hasEmptyState = /khong co bai viet nao de hien thi|no posts to show|no content found/i.test(document.body?.innerText || '');
+                return {
+                    articleCount,
+                    feedArticleCount,
+                    hasEmptyState,
+                    currentUrl: window.location.href
+                };
+            }).catch(() => ({
+                articleCount: 0,
+                feedArticleCount: 0,
+                hasEmptyState: false,
+                currentUrl: this.page.url()
+            }));
+
+            this.log(`[FB] Removed content page meta: url=${removedMeta.currentUrl} | articleCount=${removedMeta.articleCount} | feedArticleCount=${removedMeta.feedArticleCount} | hasEmptyState=${removedMeta.hasEmptyState}`);
             
-            // TRÆ¯á»œNG Há»¢P 1: Trang trá»‘ng (KhÃ´ng cÃ³ bÃ i viáº¿t bá»‹ gá»¡)
             if (pageText.includes('KhÃ´ng cÃ³ bÃ i viáº¿t nÃ o Ä‘á»ƒ hiá»ƒn thá»‹') || 
                 pageText.includes('No posts to show') ||
                 pageText.includes('No content found')) {
-                console.log('[FB] XÃ¡c nháº­n: Trang ná»™i dung bá»‹ gá»¡ trá»‘ng trÆ¡n. KhÃ´ng cÃ³ váº¥n Ä‘á» gÃ¬.');
+                this.log('[FB] Xac nhan: trang my_removed_content dang trong.');
                 return 'clean';
             }
 
-            // TRÆ¯á»œNG Há»¢P 2: TÃ¬m kiáº¿m tá»« khÃ³a cáº£nh bÃ¡o trong vÄƒn báº£n hiá»ƒn thá»‹ (innerText)
-            // LÆ°u Ã½: KhÃ´ng dÃ¹ng page.content() vÃ¬ nÃ³ quÃ¡ rá»™ng, dá»… bá»‹ nhiá»…u bá»Ÿi menu/script
+            if (
+                /\/my_removed_content\/?$/i.test(removedMeta.currentUrl || '') &&
+                !removedMeta.hasEmptyState &&
+                (removedMeta.articleCount > 0 || removedMeta.feedArticleCount > 0)
+            ) {
+                this.log('[FB] Phat hien bai xuat hien trong my_removed_content. Xem nhu da bi go.');
+                if (pageText.toLowerCase().includes('liÃªn káº¿t') || pageText.toLowerCase().includes('link')) {
+                    return 'removed_by_link';
+                }
+                return 'removed_other';
+            }
+
             const warningKeywords = [
                 'Nhiá»u ngÆ°á»i bÃ¡o cÃ¡o', 'vi pháº¡m tiÃªu chuáº©n cá»™ng Ä‘á»“ng',
                 'Tá»± Ä‘á»™ng gá»¡', 'Auto-removed', 'Ä‘Ã£ bá»‹ gá»¡', 'Ná»™i dung bá»‹ gá»¡',
@@ -1006,17 +1033,17 @@ class FBAutomator {
             }
 
             if (isRemoved) {
-                console.log(`==> [Cáº¢NH BÃO]: PhÃ¡t hiá»‡n bÃ i viáº¿t bá»‹ gá»¡. LÃ½ do nghi ngá»: ${matchedKw}`);
+                this.log(`==> [CANH BAO]: Phat hien bai viet bi go. Ly do nghi ngo: ${matchedKw}`);
                 if (pageText.toLowerCase().includes('liÃªn káº¿t') || pageText.toLowerCase().includes('link')) {
                     return 'removed_by_link';
                 }
                 return 'removed_other';
             }
             
-            console.log('[FB] KhÃ´ng tháº¥y dáº¥u hiá»‡u bÃ i viáº¿t bá»‹ gá»¡ dá»±a trÃªn vÄƒn báº£n hiá»ƒn thá»‹.');
+            this.log('[FB] Khong thay dau hieu bai viet bi go tren my_removed_content.');
             return 'clean';
         } catch (error) {
-            console.error('[FB] Lá»—i khi kiá»ƒm tra removed content:', error);
+            this.log(`[FB] Loi khi kiem tra removed content: ${error.message}`);
             return 'error';
         }
     }
