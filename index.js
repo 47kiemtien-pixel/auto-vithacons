@@ -1,20 +1,25 @@
-require('dotenv').config();
+﻿require('dotenv').config();
 const FBAutomator = require('./fb_automator');
 const { paraphrase } = require('./paraphraser');
 const { sleep, randomDelay } = require('./scheduler');
+
+const PARAPHRASE_TIMEOUT_MS = 5000;
+const QUICK_POST_VERIFY_DELAY_MS = 1500;
+const FAST_GROUP_DELAY_MIN_MS = 15000;
+const FAST_GROUP_DELAY_MAX_MS = 30000;
 
 async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '') {
     const fs = require('fs');
     const path = require('path');
     
-    // Đọc danh sách nhóm cấm link
+    // Äá»c danh sÃ¡ch nhÃ³m cáº¥m link
     const antiLinkPath = path.join(__dirname, 'anti_link_groups.txt');
     let antiLinkGroups = new Set();
     if (fs.existsSync(antiLinkPath)) {
         antiLinkGroups = new Set(fs.readFileSync(antiLinkPath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l));
     }
 
-    // Xác định nội dung bài viết
+    // XÃ¡c Ä‘á»‹nh ná»™i dung bÃ i viáº¿t
     let baseContent = postContent ? postContent.trim() : '';
     if (!baseContent) {
         const contentPath = path.join(__dirname, 'content.txt');
@@ -24,174 +29,208 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
     }
 
     if (!targetGroups || targetGroups.length === 0 || !baseContent) {
-        const err = "Lỗi: Không có danh sách nhóm hoặc nội dung bài viết trống.";
+        const err = "Lá»—i: KhÃ´ng cÃ³ danh sÃ¡ch nhÃ³m hoáº·c ná»™i dung bÃ i viáº¿t trá»‘ng.";
         console.error(err);
         logCallback({ type: 'error', message: err });
         return;
     }
 
-    const automator = new FBAutomator();
+    const automator = new FBAutomator((message) => {
+        logCallback({ type: 'info', message });
+    });
     
     try {
-        logCallback({ type: 'info', message: 'Khởi tạo trình duyệt...' });
+        logCallback({ type: 'info', message: 'Khá»Ÿi táº¡o trÃ¬nh duyá»‡t...' });
         await automator.init(browserContext);
-        logCallback({ type: 'info', message: 'Kiểm tra đăng nhập...' });
+        logCallback({ type: 'info', message: 'Kiá»ƒm tra Ä‘Äƒng nháº­p...' });
         await automator.login();
 
-        // Xác định thư mục hình ảnh
+        // XÃ¡c Ä‘á»‹nh thÆ° má»¥c hÃ¬nh áº£nh
         const os = require('os');
-        const mediaDir = imageFolderPath ? imageFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Mẫu nhà 2026');
+        const mediaDir = imageFolderPath ? imageFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Máº«u nhÃ  2026');
         
         let imagePaths = [];
         if (fs.existsSync(mediaDir)) {
             imagePaths = fs.readdirSync(mediaDir)
                 .filter(file => /\.(jpg|jpeg|png|webp)$/i.test(file))
                 .map(file => path.join(mediaDir, file));
-            const msg = `[Main] Đã tìm thấy ${imagePaths.length} ảnh trong thư mục ${mediaDir}`;
+            const msg = `[Main] ÄÃ£ tÃ¬m tháº¥y ${imagePaths.length} áº£nh trong thÆ° má»¥c ${mediaDir}`;
             console.log(msg);
             logCallback({ type: 'info', message: msg });
+            if (imagePaths.length === 0) {
+                logCallback({ type: 'warning', message: `[Main] ThÆ° má»¥c áº£nh cÃ³ tá»“n táº¡i nhÆ°ng khÃ´ng cÃ³ file .jpg/.jpeg/.png/.webp nÃ o: ${mediaDir}` });
+            }
         } else {
-            const msg = `[Main] Không tìm thấy thư mục ảnh: ${mediaDir}`;
+            const msg = `[Main] KhÃ´ng tÃ¬m tháº¥y thÆ° má»¥c áº£nh: ${mediaDir}`;
             console.log(msg);
             logCallback({ type: 'warning', message: msg });
         }
-
-        const fbUserId = process.env.FB_USER_ID;
 
         for (let i = 0; i < targetGroups.length; i++) {
             let groupObj = targetGroups[i];
             let groupUrl = typeof groupObj === 'string' ? groupObj.trim() : groupObj.url.trim();
 
-            const headerMsg = `\n--- [Đang xử lý ${i + 1}/${targetGroups.length}] ---`;
+            const headerMsg = `\n--- [Äang xá»­ lÃ½ ${i + 1}/${targetGroups.length}] ---`;
             console.log(headerMsg);
-            logCallback({ type: 'progress', message: `Đang xử lý ${i + 1}/${targetGroups.length}: ${groupUrl}`, groupUrl });
+            logCallback({ type: 'progress', message: `Äang xá»­ lÃ½ ${i + 1}/${targetGroups.length}: ${groupUrl}`, groupUrl });
             
-            // Xử lý nội dung (paraphrase nếu được chọn)
-            console.log(`[Main] Đang chuẩn bị nội dung cho nhóm: ${groupUrl}`);
+            // Xá»­ lÃ½ ná»™i dung (paraphrase náº¿u Ä‘Æ°á»£c chá»n)
+            console.log(`[Main] Äang chuáº©n bá»‹ ná»™i dung cho nhÃ³m: ${groupUrl}`);
             let finalContent = baseContent;
             
-            // KIỂM TRA NẾU NHÓM CẤM LINK -> XOÁ LINK KHỎI NỘI DUNG
+            // KIá»‚M TRA Náº¾U NHÃ“M Cáº¤M LINK -> XOÃ LINK KHá»ŽI Ná»˜I DUNG
             if (antiLinkGroups.has(groupUrl)) {
-                logCallback({ type: 'warning', message: `⚠️ Nhóm này CẤM LINK. Đang tự động loại bỏ các liên kết...`, groupUrl });
-                // Regex để tìm URL: http, https, .com, .vn, ...
+                logCallback({ type: 'warning', message: `âš ï¸ NhÃ³m nÃ y Cáº¤M LINK. Äang tá»± Ä‘á»™ng loáº¡i bá» cÃ¡c liÃªn káº¿t...`, groupUrl });
+                // Regex Ä‘á»ƒ tÃ¬m URL: http, https, .com, .vn, ...
                 const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
                 finalContent = finalContent.replace(urlRegex, '');
             }
 
             try {
-                const rewritten = await paraphrase(finalContent);
+                const rewritten = await Promise.race([
+                    paraphrase(finalContent),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('PARAPHRASE_TIMEOUT')), PARAPHRASE_TIMEOUT_MS))
+                ]);
                 if (rewritten && rewritten.trim() !== "") {
                     finalContent = rewritten;
-                    console.log(`[Main] Nội dung đã rewrite:\n"${finalContent}"`);
-                    logCallback({ type: 'info', message: '✨ Đã paraphrase nội dung để tránh spam.', groupUrl });
+                    console.log(`[Main] Ná»™i dung Ä‘Ã£ rewrite:\n"${finalContent}"`);
+                    logCallback({ type: 'info', message: 'âœ¨ ÄÃ£ paraphrase ná»™i dung Ä‘á»ƒ trÃ¡nh spam.', groupUrl });
                 } else {
-                    console.log('[Main] Rewrite rỗng, dùng nội dung gốc.');
+                    console.log('[Main] Rewrite rá»—ng, dÃ¹ng ná»™i dung gá»‘c.');
                 }
             } catch (err) {
                 if (err.message === "QUOTA_EXCEEDED") {
-                    const quotaMsg = '⚠️ CẢNH BÁO: API Gemini đã hết hạn mức (Quota Exceeded). Bốt sẽ dùng nội dung gốc để đăng tiếp.';
+                    const quotaMsg = 'âš ï¸ Cáº¢NH BÃO: API Gemini Ä‘Ã£ háº¿t háº¡n má»©c (Quota Exceeded). Bá»‘t sáº½ dÃ¹ng ná»™i dung gá»‘c Ä‘á»ƒ Ä‘Äƒng tiáº¿p.';
                     console.log(`[Main] ${quotaMsg}`);
                     logCallback({ type: 'warning', message: quotaMsg, groupUrl });
+                } else if (err.message === 'PARAPHRASE_TIMEOUT') {
+                    const timeoutMsg = 'Paraphrase qua cham, bo qua de dang nhanh hon.';
+                    console.log(`[Main] ${timeoutMsg}`);
+                    logCallback({ type: 'warning', message: timeoutMsg, groupUrl });
                 } else {
-                    console.log(`[Main] Dùng nội dung gốc thay thế do paraphrase lỗi: ${err.message}`);
+                    console.log(`[Main] DÃ¹ng ná»™i dung gá»‘c thay tháº¿ do paraphrase lá»—i: ${err.message}`);
                 }
             }
 
-            // Tiến hành đăng bài
-            logCallback({ type: 'status', message: `Tiến hành lấy nút đăng bài...`, groupUrl });
+            // Tiáº¿n hÃ nh Ä‘Äƒng bÃ i
+            logCallback({ type: 'status', message: `Tiáº¿n hÃ nh láº¥y nÃºt Ä‘Äƒng bÃ i...`, groupUrl });
+            logCallback({
+                type: 'info',
+                message: `[Main] Chuáº©n bá»‹ Ä‘Äƒng vÃ o ${groupUrl} | áº£nh: ${imagePaths.length} | thÆ° má»¥c áº£nh: ${mediaDir}`,
+                groupUrl
+            });
             // Override console.log temporarily inside automator? Actually just let it print to console.
             const result = await automator.postToGroup(groupUrl, finalContent, imagePaths);
+            logCallback({
+                type: 'info',
+                message: `[Main] Káº¿t quáº£ postToGroup: ${JSON.stringify(result || null)}`,
+                groupUrl
+            });
             
             if (result && result.success) {
-                // Ghi vào file lịch sử để công cụ get_groups không lấy lại, kèm thời gian đăng
+                // Ghi vÃ o file lá»‹ch sá»­ Ä‘á»ƒ cÃ´ng cá»¥ get_groups khÃ´ng láº¥y láº¡i, kÃ¨m thá»i gian Ä‘Äƒng
                 const historyPath = path.join(__dirname, 'posted_history.txt');
                 const timestamp = Date.now();
                 fs.appendFileSync(historyPath, `${groupUrl}|${timestamp}\n`);
                 
                 if (result.pending) {
-                    const msg = `[Main] Đăng xong, Facebook báo ĐANG CHỜ PHÊ DUYỆT ngay lập tức.`;
+                    const msg = `[Main] ÄÄƒng xong, Facebook bÃ¡o ÄANG CHá»œ PHÃŠ DUYá»†T ngay láº­p tá»©c.`;
                     console.log(msg);
                     logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
                 } else {
-                    const msg = `[Main] Đăng thành công! Đang đợi 10 giây để kiểm tra xem bài có bị gỡ thầm lặng không...`;
+                    const msg = `[Main] ÄÄƒng thÃ nh cÃ´ng! Äang Ä‘á»£i 3 giÃ¢y Ä‘á»ƒ kiá»ƒm tra nhanh tráº¡ng thÃ¡i bÃ i...`;
                     console.log(msg);
                     logCallback({ type: 'info', message: msg, groupUrl });
                     
-                    await sleep(10000); // Đợi 10 giây để FB filter link (nếu có)
+                    await sleep(QUICK_POST_VERIFY_DELAY_MS);
                     
                     const removedStatus = await automator.checkRemovedContent(groupUrl);
                     if (removedStatus === 'removed_by_link' || removedStatus === 'removed_other') {
-                        const reason = removedStatus === 'removed_by_link' ? 'do CHỨA LINK' : 'nghi ngờ vi phạm/spam';
-                        const retryMsg = `⚠️ PHÁT HIỆN: Bài viết vừa đăng đã bị gỡ thầm lặng (${reason}). Tiến hành đăng lại lần 2 KHÔNG KÈM LINK...`;
+                        const reason = removedStatus === 'removed_by_link' ? 'do CHá»¨A LINK' : 'nghi ngá» vi pháº¡m/spam';
+                        const retryMsg = `âš ï¸ PHÃT HIá»†N: BÃ i viáº¿t vá»«a Ä‘Äƒng Ä‘Ã£ bá»‹ gá»¡ tháº§m láº·ng (${reason}). Tiáº¿n hÃ nh Ä‘Äƒng láº¡i láº§n 2 KHÃ”NG KÃˆM LINK...`;
                         console.log(retryMsg);
                         logCallback({ type: 'warning', message: retryMsg, groupUrl });
 
-                        // Lưu vào danh sách cấm link vĩnh viễn
+                        // LÆ°u vÃ o danh sÃ¡ch cáº¥m link vÄ©nh viá»…n
                         if (!antiLinkGroups.has(groupUrl)) {
                             fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
                             antiLinkGroups.add(groupUrl);
                         }
 
-                        // Xử lý lại nội dung (Xoá sạch link, không để lại văn bản thay thế)
+                        // Xá»­ lÃ½ láº¡i ná»™i dung (XoÃ¡ sáº¡ch link, khÃ´ng Ä‘á»ƒ láº¡i vÄƒn báº£n thay tháº¿)
                         const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
                         const contentNoLink = finalContent.replace(urlRegex, '');
                         
-                        // Đăng lại lần 2
+                        // ÄÄƒng láº¡i láº§n 2
                         const retryResult = await automator.postToGroup(groupUrl, contentNoLink, imagePaths);
                         if (retryResult && retryResult.success) {
-                            logCallback({ type: 'success', message: '✅ ĐÃ ĐĂNG LẠI THÀNH CÔNG (Không kèm link).', groupUrl, status: 'published' });
+                            logCallback({ type: 'success', message: 'âœ… ÄÃƒ ÄÄ‚NG Láº I THÃ€NH CÃ”NG (KhÃ´ng kÃ¨m link).', groupUrl, status: 'published' });
                         } else {
-                            logCallback({ type: 'error', message: '❌ Thất bại khi cố gắng đăng lại.', groupUrl });
+                            logCallback({ type: 'error', message: 'âŒ Tháº¥t báº¡i khi cá»‘ gáº¯ng Ä‘Äƒng láº¡i.', groupUrl });
                         }
                     } else {
-                        logCallback({ type: 'success', message: '✅ Bài viết vẫn ổn định (Không bị gỡ).', groupUrl, status: 'published' });
+                        logCallback({ type: 'success', message: 'âœ… BÃ i viáº¿t váº«n á»•n Ä‘á»‹nh (KhÃ´ng bá»‹ gá»¡).', groupUrl, status: 'published' });
                     }
                 }
                 
-                // Nghỉ ngơi giữa các nhóm nếu không phải nhóm cuối cùng
+                // Nghá»‰ ngÆ¡i giá»¯a cÃ¡c nhÃ³m náº¿u khÃ´ng pháº£i nhÃ³m cuá»‘i cÃ¹ng
                 if (i < targetGroups.length - 1) {
-                    const minMin = 1;
-                    const maxMin = 3;
-                    const delayMs = Math.floor(Math.random() * (maxMin - minMin + 1) + minMin) * 60 * 1000;
-                    const delayMinutes = (delayMs / 60000).toFixed(0);
-                    const msg = `[Scheduler] Đợi ${delayMinutes} phút trước khi đăng bài tiếp theo để tránh spam...`;
+                    const delayMs = Math.floor(Math.random() * (FAST_GROUP_DELAY_MAX_MS - FAST_GROUP_DELAY_MIN_MS + 1)) + FAST_GROUP_DELAY_MIN_MS;
+                    const delaySeconds = (delayMs / 1000).toFixed(0);
+                    const msg = `[Scheduler] Äá»£i ${delaySeconds} giÃ¢y trÆ°á»›c khi Ä‘Äƒng bÃ i tiáº¿p theo...`;
                     console.log(msg);
                     logCallback({ type: 'delay', message: msg, groupUrl });
                     await sleep(delayMs);
                 }
             } else {
                 if (result && result.reason === 'rejected_link') {
-                    const msg = '❌ BỊ TỪ CHỐI: Nhóm này không cho phép đăng Link. Đã lưu vào danh sách hạn chế.';
+                    const msg = 'âŒ Bá»Š Tá»ª CHá»I: NhÃ³m nÃ y khÃ´ng cho phÃ©p Ä‘Äƒng Link. ÄÃ£ lÆ°u vÃ o danh sÃ¡ch háº¡n cháº¿.';
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'rejected_link' });
                     
-                    // Lưu vào danh sách cấm link
+                    // LÆ°u vÃ o danh sÃ¡ch cáº¥m link
                     if (!antiLinkGroups.has(groupUrl)) {
                         fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
                         antiLinkGroups.add(groupUrl);
                     }
+                } else if (result && result.reason === 'image_upload_failed') {
+                    const msg = 'âŒ Upload áº£nh chÆ°a thÃ nh cÃ´ng. Bot Ä‘Ã£ dá»«ng trÆ°á»›c khi báº¥m ÄÄƒng Ä‘á»ƒ trÃ¡nh bÃ i chá»‰ cÃ³ ná»™i dung.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'image_upload_failed' });
+                } else if (result && result.reason === 'composer_not_found') {
+                    const msg = 'âŒ KhÃ´ng tÃ¬m tháº¥y Ã´ má»Ÿ há»™p soáº¡n bÃ i trong nhÃ³m.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'composer_not_found' });
+                } else if (result && result.reason === 'textbox_not_found') {
+                    const msg = 'âŒ ÄÃ£ má»Ÿ há»™p Ä‘Äƒng nhÆ°ng khÃ´ng nháº­p Ä‘Æ°á»£c ná»™i dung vÃ o Ã´ soáº¡n bÃ i.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'textbox_not_found' });
+                } else if (result && result.reason === 'submit_button_not_found') {
+                    const msg = 'âŒ KhÃ´ng tÃ¬m tháº¥y nÃºt ÄÄƒng hoáº·c nÃºt bá»‹ khÃ³a quÃ¡ lÃ¢u.';
+                    console.log(msg);
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'submit_button_not_found' });
                 } else {
-                    const msg = '[Main] Đăng bài thất bại.';
+                    const msg = `[Main] ÄÄƒng bÃ i tháº¥t báº¡i. LÃ½ do: ${result?.reason || 'unknown'}`;
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'failed' });
                 }
             }
         }
         
-        const doneMsg = '\n=== Đã hoàn thành tất cả bài đăng! ===';
+        const doneMsg = '\n=== ÄÃ£ hoÃ n thÃ nh táº¥t cáº£ bÃ i Ä‘Äƒng! ===';
         console.log(doneMsg);
         logCallback({ type: 'done', message: doneMsg });
 
     } catch (error) {
-        console.error("Lỗi hệ thống:", error);
-        logCallback({ type: 'error', message: `Lỗi hệ thống: ${error.message}` });
+        console.error("Lá»—i há»‡ thá»‘ng:", error);
+        logCallback({ type: 'error', message: `Lá»—i há»‡ thá»‘ng: ${error.message}` });
     } finally {
-        // Chỉ đóng trang hiện tại, không đóng context dùng chung
-        // await automator.close(); // Giữ tab lại theo yêu cầu người dùng
+        // Chá»‰ Ä‘Ã³ng trang hiá»‡n táº¡i, khÃ´ng Ä‘Ã³ng context dÃ¹ng chung
+        // await automator.close(); // Giá»¯ tab láº¡i theo yÃªu cáº§u ngÆ°á»i dÃ¹ng
     }
 }
 
-// Giữ nguyên tính năng chạy từ dòng lệnh để tương thích ngược
+// Giá»¯ nguyÃªn tÃ­nh nÄƒng cháº¡y tá»« dÃ²ng lá»‡nh Ä‘á»ƒ tÆ°Æ¡ng thÃ­ch ngÆ°á»£c
 async function main() {
     const fs = require('fs');
     const path = require('path');
@@ -201,7 +240,7 @@ async function main() {
     if (fs.existsSync(extractedPath)) {
         const fileContent = fs.readFileSync(extractedPath, 'utf-8');
         const fileGroups = fileContent.split('\n')
-            .map(line => line.replace(/,/g, '').trim()) // Xóa dấu phẩy và khoảng trắng thừa
+            .map(line => line.replace(/,/g, '').trim()) // XÃ³a dáº¥u pháº©y vÃ  khoáº£ng tráº¯ng thá»«a
             .filter(line => line.length > 0 && line.startsWith('http'));
         groups = [...new Set([...groups, ...fileGroups])];
     }
@@ -209,11 +248,11 @@ async function main() {
     const limit = parseInt(process.argv[2], 10);
     if (!isNaN(limit) && limit > 0) {
         groups = groups.slice(0, limit);
-        console.log(`[Main] Giới hạn chạy: Chỉ xử lý ${limit} nhóm đầu tiên.`);
+        console.log(`[Main] Giá»›i háº¡n cháº¡y: Chá»‰ xá»­ lÃ½ ${limit} nhÃ³m Ä‘áº§u tiÃªn.`);
     }
     
     await startPosting(groups, (evt) => {
-        // Log event cho UI nếu chạy độc lập thì không cần làm gì
+        // Log event cho UI náº¿u cháº¡y Ä‘á»™c láº­p thÃ¬ khÃ´ng cáº§n lÃ m gÃ¬
     });
 }
 
@@ -222,3 +261,4 @@ if (require.main === module) {
 }
 
 module.exports = { startPosting };
+

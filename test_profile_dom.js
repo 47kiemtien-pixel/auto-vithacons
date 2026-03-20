@@ -8,9 +8,9 @@ const fs = require('fs');
         const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
         
         let exePath = [
+            'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe',
             chromePath, 
-            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe', 
-            'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe'
+            'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe'
         ].find(p => fs.existsSync(p));
 
         const context = await chromium.launchPersistentContext(userDataDir, {

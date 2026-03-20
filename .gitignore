@@ -47,3 +47,4 @@ admin-ui/node_modules/
 # Private
 .env
 fb_user_data/
+fb_coccoc_profile/

@@ -6,7 +6,9 @@ function App() {
   const [selectedGroups, setSelectedGroups] = useState(new Set());
   const [logs, setLogs] = useState([]);
   const [isPosting, setIsPosting] = useState(false);
+  const [isScanning, setIsScanning] = useState(false);
   const [isDiscovering, setIsDiscovering] = useState(false);
+  const [isHarvestingVisible, setIsHarvestingVisible] = useState(false);
   const [autoJoin, setAutoJoin] = useState(true);
   const [successGroups, setSuccessGroups] = useState([]);
   const [activeTab, setActiveTab] = useState('my-groups'); // 'my-groups' hoặc 'discover'
@@ -53,6 +55,14 @@ function App() {
             }
             return [...prev, data.group];
           });
+        } else if (data.type === 'group_updated') {
+          setGroups(prev => {
+            const index = prev.findIndex(g => g.url === data.group.url);
+            if (index === -1) return prev;
+            const next = [...prev];
+            next[index] = { ...next[index], ...data.group };
+            return next;
+          });
         } else if (data.type === 'group_discovered') {
           setDiscoveredGroups(prev => {
             if (prev.find(g => g.url === data.group.url)) return prev;
@@ -62,12 +72,29 @@ function App() {
         
         if (data.type === 'success' && data.groupUrl) {
           setSuccessGroups(prev => [...new Set([...prev, data.groupUrl])]);
-          setGroups(prev => prev.filter(g => g.url !== data.groupUrl));
+          setSelectedGroups(prev => {
+            const next = new Set(prev);
+            next.delete(data.groupUrl);
+            return next;
+          });
         }
 
         if (data.type === 'done') {
           if (data.source === 'posting') setIsPosting(false);
+          if (data.source === 'scanning') setIsScanning(false);
           if (data.source === 'discovery') setIsDiscovering(false);
+          if (data.source === 'visible-harvest') setIsHarvestingVisible(false);
+        }
+
+        if (data.type === 'start' && data.source === 'visible-harvest') {
+          setIsHarvestingVisible(true);
+        }
+
+        if (data.type === 'error' && data.source === 'scanning') {
+          setIsScanning(false);
+        }
+        if (data.type === 'error' && data.source === 'visible-harvest') {
+          setIsHarvestingVisible(false);
         }
         
         // Gắn nhãn cho log dựa trên source
@@ -88,18 +115,62 @@ function App() {
     const keyword = prompt("Nhập từ khóa để lọc nhóm ĐÃ THAM GIA:", "");
     if (keyword === null) return;
     try {
-      setGroups([]);
-      setSelectedGroups(new Set());
+      setIsScanning(true);
       await fetch(`${API_BASE}/fetch-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ keyword })
       });
     } catch (e) {
+      setIsScanning(false);
       alert('Lỗi khi gọi API');
     }
   };
 
+  const stopScanning = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/stop-scan`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || 'Không thể dừng quét');
+      }
+    } catch (e) {
+      alert('Lỗi kết nối tới Server');
+    }
+  };
+
+  const startVisibleHarvest = async () => {
+    const keyword = prompt("Nhập từ khóa nếu muốn lọc nhóm đang hiện trên màn hình:", "");
+    if (keyword === null) return;
+    try {
+      setIsHarvestingVisible(true);
+      const res = await fetch(`${API_BASE}/start-visible-harvest`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ keyword })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setIsHarvestingVisible(false);
+        alert(data.error || 'Không thể bật thu từ màn hình');
+      }
+    } catch (e) {
+      setIsHarvestingVisible(false);
+      alert('Lỗi kết nối tới Server');
+    }
+  };
+
+  const stopVisibleHarvest = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/stop-visible-harvest`, { method: 'POST' });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || 'Không thể dừng thu từ màn hình');
+      }
+    } catch (e) {
+      alert('Lỗi kết nối tới Server');
+    }
+  };
   const triggerDiscoverGroups = async () => {
     const keyword = prompt("Nhập từ khóa để TÌM KIẾM nhóm mới:", "");
     if (!keyword) return;
@@ -113,6 +184,7 @@ function App() {
         body: JSON.stringify({ keyword, autoJoin })
       });
     } catch (e) {
+      setIsScanning(false);
       alert('Lỗi khi gọi API');
       setIsDiscovering(false);
     }
@@ -141,9 +213,15 @@ function App() {
     }
     const groupList = groups.filter(g => selectedGroups.has(g.url));
     setIsPosting(true);
-    setLogs([]);
+    setLogs([
+      {
+        type: 'start',
+        source: 'posting',
+        message: `[POST] Đã gửi lệnh đăng bài cho ${groupList.length} nhóm...`
+      }
+    ]);
     try {
-      await fetch(`${API_BASE}/post`, {
+      const res = await fetch(`${API_BASE}/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ 
@@ -152,12 +230,28 @@ function App() {
           imageFolderPath
         })
       });
-      const res = await req.json();
-      if (!res.success) {
-        alert(res.error || 'Có lỗi xảy ra!');
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        setLogs(prev => [...prev, {
+          type: 'error',
+          source: 'posting',
+          message: `[POST] ${data.error || 'Có lỗi xảy ra khi gọi API /post'}`
+        }]);
+        alert(data.error || 'Có lỗi xảy ra!');
         setIsPosting(false);
+      } else {
+        setLogs(prev => [...prev, {
+          type: 'info',
+          source: 'posting',
+          message: `[POST] Backend đã nhận lệnh: ${data.message || 'Tiến trình đăng đang chạy ngầm...'}`
+        }]);
       }
     } catch (error) {
+      setLogs(prev => [...prev, {
+        type: 'error',
+        source: 'posting',
+        message: `[POST] Lỗi kết nối tới Server: ${error.message}`
+      }]);
       alert('Lỗi kết nối tới Server');
       setIsPosting(false);
     }
@@ -200,9 +294,31 @@ function App() {
             <div className="flex gap-3 justify-end">
                 <button 
                     onClick={triggerFetchMyGroups}
+                    disabled={isScanning}
                     className="px-4 py-2 bg-white border border-gray-300 text-gray-700 rounded-lg shadow-sm hover:bg-gray-50 transition-all font-medium text-sm flex items-center gap-2"
                 >
-                    👥 Quét nhóm của tôi
+                    {isScanning ? '⏳ Đang quét...' : '👥 Quét nhóm của tôi'}
+                </button>
+                <button 
+                    onClick={stopScanning}
+                    disabled={!isScanning}
+                    className={`px-4 py-2 rounded-lg shadow-sm transition-all font-medium text-sm ${ isScanning ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100' : 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed' }`}
+                >
+                    Dừng quét
+                </button>
+                <button
+                    onClick={startVisibleHarvest}
+                    disabled={isHarvestingVisible}
+                    className={`px-4 py-2 rounded-lg shadow-sm transition-all font-medium text-sm ${ isHarvestingVisible ? 'bg-amber-100 border border-amber-200 text-amber-700 cursor-not-allowed' : 'bg-amber-50 border border-amber-200 text-amber-700 hover:bg-amber-100' }`}
+                >
+                    {isHarvestingVisible ? 'Đang thu màn hình...' : 'Thu từ màn hình'}
+                </button>
+                <button
+                    onClick={stopVisibleHarvest}
+                    disabled={!isHarvestingVisible}
+                    className={`px-4 py-2 rounded-lg shadow-sm transition-all font-medium text-sm ${ isHarvestingVisible ? 'bg-red-50 border border-red-200 text-red-700 hover:bg-red-100' : 'bg-gray-100 border border-gray-200 text-gray-400 cursor-not-allowed' }`}
+                >
+                    Dừng thu màn hình
                 </button>
                 <div className="flex items-center gap-2 mr-2">
                     <input 
@@ -433,3 +549,8 @@ function App() {
 }
 
 export default App;
+
+
+
+
+
