@@ -22,6 +22,7 @@ app.use((err, req, res, next) => {
 });
 
 const PORT = 3001;
+const settingsPath = path.join(__dirname, 'settings.json');
 
 let isPosting = false;
 let isScanning = false;
@@ -33,6 +34,33 @@ let activeClients = [];
 let scanControl = { cancelled: false };
 const groupsDataPath = path.join(__dirname, 'groups_data.json');
 const postedHistoryPath = path.join(__dirname, 'posted_history.txt');
+
+function readSettings() {
+    const defaults = { manualActorId: '', delayBetweenPostsMinutes: 1 };
+    if (!fs.existsSync(settingsPath)) return defaults;
+    try {
+        const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
+        const parsedDelay = Number(parsed?.delayBetweenPostsMinutes);
+        return {
+            ...defaults,
+            ...parsed,
+            manualActorId: String(parsed?.manualActorId || '').trim(),
+            delayBetweenPostsMinutes: Number.isFinite(parsedDelay) && parsedDelay >= 0 ? parsedDelay : defaults.delayBetweenPostsMinutes
+        };
+    } catch (_) {
+        return defaults;
+    }
+}
+
+function writeSettings(nextSettings) {
+    const rawDelay = Number(nextSettings?.delayBetweenPostsMinutes);
+    const normalized = {
+        manualActorId: String(nextSettings?.manualActorId || '').trim(),
+        delayBetweenPostsMinutes: Number.isFinite(rawDelay) && rawDelay >= 0 ? rawDelay : 1
+    };
+    fs.writeFileSync(settingsPath, JSON.stringify(normalized, null, 2), 'utf-8');
+    return normalized;
+}
 
 function readPostedHistoryMap() {
     if (!fs.existsSync(postedHistoryPath)) return new Map();
@@ -307,9 +335,26 @@ async function startPendingCheckWorker() {
                     continue;
                 }
 
-                const actorForGroup = await automator.getActorFromGroupContext(workingGroup.url) || await automator.getCurrentUserId();
+                const settings = readSettings();
+                const actorForGroup = settings.manualActorId;
+                if (!actorForGroup) {
+                    workingGroup.lastPostStatus = 'Chua nhap Actor ID';
+                    workingGroup.isSelectable = false;
+                    workingGroup.actorIdUsed = '';
+                    workingGroup.actorSource = 'missing-manual';
+                    broadcastLog({
+                        type: 'warning',
+                        message: 'Chua nhap Actor ID thu cong. Worker check bai van chay, nhung se bo qua cho den khi ban nhap ID.',
+                        source: 'checking'
+                    });
+                    upsertGroupData(workingGroup);
+                    broadcastLog({ type: 'group_updated', group: workingGroup, source: 'checking' });
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                    continue;
+                }
                 const checkUrl = `${workingGroup.url.replace(/\/$/, '')}/user/${actorForGroup}/`;
                 workingGroup.actorIdUsed = actorForGroup;
+                workingGroup.actorSource = 'manual';
                 broadcastLog({ type: 'info', message: `Check bÃ i táº¡i ${checkUrl}`, source: 'checking' });
 
                 await automator.page.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
@@ -374,6 +419,32 @@ app.get('/api/groups', (req, res) => {
     } else {
         res.json([]);
     }
+});
+
+app.get('/api/settings', (req, res) => {
+    res.json(readSettings());
+});
+
+app.post('/api/settings', (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiáº¿u dá»¯ liá»‡u yÃªu cáº§u' });
+    const manualActorId = String(req.body.manualActorId || '').trim();
+    const delayBetweenPostsMinutes = Number(req.body.delayBetweenPostsMinutes);
+    if (manualActorId && !/^[A-Za-z0-9._-]+$/.test(manualActorId)) {
+        return res.status(400).json({ error: 'Actor ID khÃ´ng há»£p lá»‡.' });
+    }
+    if (!Number.isFinite(delayBetweenPostsMinutes) || delayBetweenPostsMinutes < 0) {
+        return res.status(400).json({ error: 'Thoi gian cho giua cac bai khong hop le.' });
+    }
+
+    const saved = writeSettings({ manualActorId, delayBetweenPostsMinutes });
+    broadcastLog({
+        type: 'info',
+        message: saved.manualActorId
+            ? `ÄÃ£ lÆ°u Actor ID thá»§ cÃ´ng: ${saved.manualActorId} | Delay ngau nhien: 1-${saved.delayBetweenPostsMinutes} phut`
+            : `ÄÃ£ xÃ³a Actor ID thá»§ cÃ´ng | Delay ngau nhien: 1-${saved.delayBetweenPostsMinutes} phut`,
+        source: 'checking'
+    });
+    res.json({ success: true, settings: saved });
 });
 
 // API QuÃ©t danh sÃ¡ch nhÃ³m Ä‘Ã£ tham gia tá»« FB
@@ -539,6 +610,7 @@ app.post('/api/post', async (req, res) => {
 
     try {
         const context = await browserManager.getContext();
+        const settings = readSettings();
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });
             
@@ -546,7 +618,7 @@ app.post('/api/post', async (req, res) => {
             if (event.type === 'success' && event.groupUrl) {
                 markGroupAfterSuccess(event.groupUrl, event.status);
             }
-        }, context, postContent, imageFolderPath);
+        }, context, postContent, imageFolderPath, settings.delayBetweenPostsMinutes);
     } catch (e) {
         broadcastLog({ type: 'error', message: `Lá»—i ná»™i bá»™: ${e.message}`, source: 'posting' });
     } finally {
@@ -692,4 +764,3 @@ app.listen(PORT, () => {
         console.error('[Server] KhÃ´ng thá»ƒ báº­t worker check bÃ i khi khá»Ÿi Ä‘á»™ng:', e.message);
     });
 });
-

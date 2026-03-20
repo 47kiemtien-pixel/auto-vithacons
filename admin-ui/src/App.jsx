@@ -14,12 +14,16 @@ function App() {
   const [activeTab, setActiveTab] = useState('my-groups'); // 'my-groups' hoặc 'discover'
   const [postContent, setPostContent] = useState('');
   const [imageFolderPath, setImageFolderPath] = useState('');
+  const [manualActorId, setManualActorId] = useState('');
+  const [delayBetweenPostsMinutes, setDelayBetweenPostsMinutes] = useState('1');
+  const [isSavingSettings, setIsSavingSettings] = useState(false);
   const logsEndRef = useRef(null);
 
   const API_BASE = 'http://localhost:3001/api';
 
   useEffect(() => {
     fetchGroups();
+    fetchSettings();
     const cleanup = setupSSE();
     return cleanup;
   }, []);
@@ -37,6 +41,44 @@ function App() {
       }
     } catch (error) {
       console.error('Failed to fetch groups:', error);
+    }
+  };
+
+  const fetchSettings = async () => {
+    try {
+      const res = await fetch(`${API_BASE}/settings`);
+      if (res.ok) {
+        const data = await res.json();
+        setManualActorId(data.manualActorId || '');
+        setDelayBetweenPostsMinutes(String(data.delayBetweenPostsMinutes ?? 1));
+      }
+    } catch (error) {
+      console.error('Failed to fetch settings:', error);
+    }
+  };
+
+  const saveSettings = async () => {
+    try {
+      setIsSavingSettings(true);
+      const res = await fetch(`${API_BASE}/settings`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ 
+          manualActorId,
+          delayBetweenPostsMinutes: Number(delayBetweenPostsMinutes || 0)
+        })
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.error || 'Khong the luu Actor ID');
+        return;
+      }
+      setManualActorId(data.settings?.manualActorId || '');
+      setDelayBetweenPostsMinutes(String(data.settings?.delayBetweenPostsMinutes ?? 1));
+    } catch (error) {
+      alert(`Loi ket noi toi Server: ${error.message}`);
+    } finally {
+      setIsSavingSettings(false);
     }
   };
 
@@ -380,6 +422,42 @@ function App() {
                     💡 <strong>Tips:</strong> Bốt sẽ tự động lấy tất cả các ảnh (.jpg, .png...) trong thư mục này để đăng kèm bài viết.
                 </p>
             </div>
+            <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Actor ID check bai</label>
+                <div className="flex gap-2">
+                    <input
+                        type="text"
+                        value={manualActorId}
+                        onChange={(e) => setManualActorId(e.target.value)}
+                        placeholder="VD: 1000... hoac username page"
+                        className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                    />
+                    <button
+                        onClick={saveSettings}
+                        disabled={isSavingSettings}
+                        className={`px-4 rounded-lg text-sm font-bold transition-all ${isSavingSettings ? 'bg-gray-200 text-gray-500 cursor-not-allowed' : 'bg-blue-600 text-white hover:bg-blue-700'}`}
+                    >
+                        {isSavingSettings ? 'Dang luu...' : 'Luu'}
+                    </button>
+                </div>
+                <p className="text-[11px] text-amber-700 bg-amber-50 border border-amber-100 rounded-lg px-3 py-2 leading-relaxed">
+                    Nhap ID hoac username ma ban muon bot dung de check bai trong group. De trong roi bam Luu de quay lai che do tu dong.
+                </p>
+            </div>
+            <div className="flex flex-col gap-2">
+                <label className="text-xs font-bold text-gray-500 uppercase tracking-wider">Delay ngau nhien giua cac bai (phut)</label>
+                <input
+                    type="number"
+                    min="0"
+                    value={delayBetweenPostsMinutes}
+                    onChange={(e) => setDelayBetweenPostsMinutes(e.target.value)}
+                    placeholder="VD: 5"
+                    className="w-full p-2.5 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 text-sm"
+                />
+                <p className="text-[11px] text-blue-700 bg-blue-50 border border-blue-100 rounded-lg px-3 py-2 leading-relaxed">
+                    Nhap N de bot cho ngau nhien tu 1 den N phut giua moi bai.
+                </p>
+            </div>
         </div>
       </section>
 
@@ -549,8 +627,3 @@ function App() {
 }
 
 export default App;
-
-
-
-
-

@@ -11,41 +11,20 @@ class BrowserManager {
     }
 
     getBrowserLaunchConfig() {
-        const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
-        const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
-        const coccocPath = 'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe';
+        const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+        const coccocCandidates = [
+            path.join(localAppData, 'CocCoc', 'Browser', 'Application', 'browser.exe'),
+            'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe'
+        ];
+        const coccocPath = coccocCandidates.find((candidate) => fs.existsSync(candidate));
 
-        if (fs.existsSync(coccocPath)) {
-            return {
-                executablePath: coccocPath,
-                userDataDir: this.projectCocCocUserDataDir,
-                args: [
-                    '--no-sandbox',
-                    '--disable-notifications',
-                    '--no-first-run',
-                    '--no-default-browser-check'
-                ],
-                shouldCleanLocks: true
-            };
-        }
-
-        if (fs.existsSync(chromePath)) {
-            return {
-                executablePath: chromePath,
-                userDataDir: this.projectUserDataDir,
-                args: [
-                    '--no-sandbox',
-                    '--disable-notifications',
-                    '--no-first-run',
-                    '--no-default-browser-check'
-                ],
-                shouldCleanLocks: true
-            };
+        if (!coccocPath) {
+            throw new Error('Khong tim thay Coc Coc tren may. Hay cai Coc Coc hoac kiem tra lai duong dan browser.exe.');
         }
 
         return {
-            executablePath: edgePath,
-            userDataDir: this.projectUserDataDir,
+            executablePath: coccocPath,
+            userDataDir: this.projectCocCocUserDataDir,
             args: [
                 '--no-sandbox',
                 '--disable-notifications',

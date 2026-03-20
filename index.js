@@ -1,14 +1,11 @@
 ﻿require('dotenv').config();
 const FBAutomator = require('./fb_automator');
 const { paraphrase } = require('./paraphraser');
-const { sleep, randomDelay } = require('./scheduler');
+const { sleep } = require('./scheduler');
 
 const PARAPHRASE_TIMEOUT_MS = 5000;
 const QUICK_POST_VERIFY_DELAY_MS = 10000;
-const FAST_GROUP_DELAY_MIN_MS = 15000;
-const FAST_GROUP_DELAY_MAX_MS = 30000;
-
-async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '') {
+async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '', delayBetweenPostsMinutes = 1) {
     const fs = require('fs');
     const path = require('path');
     let consecutiveImageUploadFailures = 0;
@@ -177,12 +174,17 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                 
                 // Nghá»‰ ngÆ¡i giá»¯a cÃ¡c nhÃ³m náº¿u khÃ´ng pháº£i nhÃ³m cuá»‘i cÃ¹ng
                 if (i < targetGroups.length - 1) {
-                    const delayMs = Math.floor(Math.random() * (FAST_GROUP_DELAY_MAX_MS - FAST_GROUP_DELAY_MIN_MS + 1)) + FAST_GROUP_DELAY_MIN_MS;
-                    const delaySeconds = (delayMs / 1000).toFixed(0);
-                    const msg = `[Scheduler] Äá»£i ${delaySeconds} giÃ¢y trÆ°á»›c khi Ä‘Äƒng bÃ i tiáº¿p theo...`;
+                    const safeDelayMinutes = Math.max(0, Number(delayBetweenPostsMinutes) || 0);
+                    const chosenDelayMinutes = safeDelayMinutes > 0
+                        ? Math.floor(Math.random() * safeDelayMinutes) + 1
+                        : 0;
+                    const delayMs = chosenDelayMinutes * 60 * 1000;
+                    const msg = `[Scheduler] Äá»£i ngáº«u nhiÃªn ${chosenDelayMinutes} phÃºt trÆ°á»›c khi Ä‘Äƒng bÃ i tiáº¿p theo...`;
                     console.log(msg);
                     logCallback({ type: 'delay', message: msg, groupUrl });
-                    await sleep(delayMs);
+                    if (delayMs > 0) {
+                        await sleep(delayMs);
+                    }
                 }
             } else {
                 if (result && result.reason === 'rejected_link') {
@@ -274,4 +276,3 @@ if (require.main === module) {
 }
 
 module.exports = { startPosting };
-

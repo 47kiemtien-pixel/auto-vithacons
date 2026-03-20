@@ -14,7 +14,16 @@ class FBAutomator {
     }
 
     getStandaloneLaunchConfig() {
-        const coccocPath = 'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe';
+        const localAppData = process.env.LOCALAPPDATA || path.join(process.env.USERPROFILE || '', 'AppData', 'Local');
+        const coccocCandidates = [
+            path.join(localAppData, 'CocCoc', 'Browser', 'Application', 'browser.exe'),
+            'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe'
+        ];
+        const coccocPath = coccocCandidates.find((candidate) => fs.existsSync(candidate));
+
+        if (!coccocPath) {
+            throw new Error('Khong tim thay Coc Coc tren may.');
+        }
 
         return {
             executablePath: coccocPath,
@@ -272,8 +281,10 @@ class FBAutomator {
         try {
             await this.page.goto(groupUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
             await this.page.waitForTimeout(4000);
+            const groupIdMatch = groupUrl.match(/\/groups\/(\d+)/i);
+            const groupId = groupIdMatch ? groupIdMatch[1] : null;
 
-            const extractActor = async () => await this.page.evaluate(() => {
+            const extractActor = async () => await this.page.evaluate((currentGroupId) => {
                 const normalize = (value) => (value || '')
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
@@ -283,8 +294,48 @@ class FBAutomator {
                     .trim()
                     .toLowerCase();
 
+                const personalWords = [
+                    'trang ca nhan',
+                    'your profile',
+                    'see your profile',
+                    'chinh sua trang ca nhan',
+                    'edit profile'
+                ];
+
+                const actorContextWords = [
+                    'dang tuong tac voi tu cach',
+                    'interacting as',
+                    'ban viet gi di',
+                    "what's on your mind",
+                    'write something',
+                    'tao bai viet cong khai',
+                    'create public post'
+                ];
+
+                const addParamCandidate = (value, score, source, store) => {
+                    if (!value || !/^\d+$/.test(String(value))) return;
+                    const existing = store.get(String(value)) || { id: String(value), score: 0, source };
+                    existing.score += score;
+                    if (!existing.source) existing.source = source;
+                    store.set(String(value), existing);
+                };
+
                 const parseActorFromHref = (href) => {
                     if (!href || typeof href !== 'string') return null;
+                    try {
+                        const url = new URL(href, window.location.origin);
+                        const groupUserRegex = currentGroupId
+                            ? new RegExp(`^/groups/${currentGroupId}/user/([^/?#]+)/?`, 'i')
+                            : /^\/groups\/\d+\/user\/([^\/?#]+)\/?/i;
+                        const groupUserMatch = url.pathname.match(groupUserRegex);
+                        if (groupUserMatch) return groupUserMatch[1];
+
+                        const pageId = url.searchParams.get('id');
+                        if ((/\/pages\//i.test(url.pathname) || /\/profile\.php$/i.test(url.pathname)) && pageId && /^\d+$/.test(pageId)) {
+                            return pageId;
+                        }
+                    } catch (_) {}
+
                     const profileMatch = href.match(/profile\.php\?(?:[^#]*?&)?id=(\d+)/i);
                     if (profileMatch) return profileMatch[1];
 
@@ -301,6 +352,28 @@ class FBAutomator {
                     return slug;
                 };
 
+                const scoreAnchor = (a, baseScore = 0) => {
+                    const actorId = parseActorFromHref(a.href);
+                    if (!actorId) return null;
+
+                    const text = normalize(a.innerText || a.getAttribute('aria-label') || a.getAttribute('title') || '');
+                    const href = a.href || '';
+                    let score = baseScore;
+
+                    if (text.length > 0 && text.length < 80) score += 10;
+                    if (!text) score -= 220;
+                    if (currentGroupId && new RegExp(`/groups/${currentGroupId}/user/`, 'i').test(href)) score += 220;
+                    else if (/\/groups\/\d+\/user\//i.test(href)) score += 120;
+                    if (/dang tuong tac voi tu cach|interacting as/.test(text)) score += 140;
+                    if (/page|trang/.test(text)) score += 35;
+                    if (/profile_plus|composer|actor|privacy_mutation_token|av=|__cft__/.test(href)) score += 35;
+                    if (personalWords.some((word) => text.includes(word))) score -= 140;
+                    if (/^[a-z0-9._ ]{3,40}$/i.test(text) && !/page|trang|studio|business|fanpage/.test(text)) score -= 120;
+                    if (/photo|anh|video|reel|tin|story/.test(text)) score -= 50;
+
+                    return { id: actorId, score, text, href };
+                };
+
                 const scoreContainer = (container) => {
                     const text = normalize(container?.innerText || '');
                     let score = 0;
@@ -308,6 +381,76 @@ class FBAutomator {
                     if (/dang tuong tac voi tu cach|interacting as|tu cach/.test(text)) score += 80;
                     return score;
                 };
+
+                const paramCandidates = new Map();
+                const paramElements = Array.from(document.querySelectorAll('a[href], form[action], input[value], button[data-testid], div[role="dialog"] a[href]'));
+                for (const el of paramElements) {
+                    const attrs = [
+                        el.getAttribute?.('href'),
+                        el.getAttribute?.('action'),
+                        el.getAttribute?.('data-post-id'),
+                        el.getAttribute?.('data-testid'),
+                        el.getAttribute?.('ajaxify'),
+                        el.getAttribute?.('value')
+                    ].filter(Boolean);
+
+                    for (const raw of attrs) {
+                        const text = String(raw);
+                        const avMatch = text.match(/[?&]av=(\d+)/i);
+                        if (avMatch) addParamCandidate(avMatch[1], 260, 'av', paramCandidates);
+
+                        const actorMatch = text.match(/[?&](?:actor_id|actorID|profile_id|owner_id|page_id)=(\d+)/i);
+                        if (actorMatch) addParamCandidate(actorMatch[1], 240, 'actor-param', paramCandidates);
+
+                        const privacyMatch = text.match(/privacy_mutation_token[^0-9]*(\d{8,})/i);
+                        if (privacyMatch) addParamCandidate(privacyMatch[1], 180, 'privacy-token', paramCandidates);
+                    }
+                }
+
+                const bestParam = Array.from(paramCandidates.values()).sort((a, b) => b.score - a.score)[0];
+                if (bestParam && bestParam.score >= 240) {
+                    return {
+                        actor: bestParam.id,
+                        debug: {
+                            mode: 'param',
+                            topParams: Array.from(paramCandidates.values()).sort((a, b) => b.score - a.score).slice(0, 5)
+                        }
+                    };
+                }
+
+                const directContextCandidates = [];
+                const contextNodes = Array.from(document.querySelectorAll('div, [role="dialog"], [role="main"], [role="feed"]'));
+                for (const node of contextNodes) {
+                    const text = normalize(node.innerText || '');
+                    if (!actorContextWords.some((word) => text.includes(word))) continue;
+
+                    const anchors = Array.from(node.querySelectorAll('a[href]'));
+                    for (const a of anchors) {
+                        const candidate = scoreAnchor(a, 90);
+                        if (!candidate) continue;
+                        if (text.includes('dang tuong tac voi tu cach') || text.includes('interacting as')) {
+                            candidate.score += 80;
+                        }
+                        directContextCandidates.push(candidate);
+                    }
+                }
+
+                const sortedDirect = directContextCandidates.sort((a, b) => b.score - a.score);
+                const bestDirect = sortedDirect[0];
+                const hasStrongContext = sortedDirect.some((item) =>
+                    !!(item.text || '').trim() &&
+                    /dang tuong tac voi tu cach|interacting as|page|trang/.test(item.text || '') ||
+                    /privacy_mutation_token|av=|actor|composer/.test(item.href || '')
+                );
+                if (bestDirect && bestDirect.score >= 150 && hasStrongContext) {
+                    return {
+                        actor: bestDirect.id,
+                        debug: {
+                            mode: 'direct',
+                            topDirect: sortedDirect.slice(0, 5)
+                        }
+                    };
+                }
 
                 const containers = Array.from(document.querySelectorAll('div[role="main"] div, div[role="feed"] div, div[data-pagelet]'));
                 const candidates = [];
@@ -317,41 +460,74 @@ class FBAutomator {
 
                     const anchors = Array.from(container.querySelectorAll('a[href]'));
                     for (const a of anchors) {
-                        const actorId = parseActorFromHref(a.href);
-                        if (!actorId) continue;
-
-                        const text = normalize(a.innerText || a.getAttribute('aria-label') || '');
-                        let score = baseScore;
-                        if (text.length > 0 && text.length < 80) score += 10;
-                        if (/trang ca nhan|your profile|see your profile|chinh sua|edit/.test(text)) score += 20;
-                        if (/photo|anh|video|reel|tin|story/.test(text)) score -= 40;
-                        candidates.push({ id: actorId, score });
+                        const candidate = scoreAnchor(a, baseScore);
+                        if (!candidate) continue;
+                        candidates.push(candidate);
                     }
                 }
 
-                return candidates.sort((a, b) => b.score - a.score)[0]?.id || null;
-            });
+                const topCandidates = candidates
+                    .filter((item) => (item.text || '').trim() || /privacy_mutation_token|av=|actor|composer/.test(item.href || ''))
+                    .sort((a, b) => b.score - a.score);
+                const bestFallback = topCandidates[0] || null;
+                const fallbackLooksStrong = Boolean(
+                    bestFallback &&
+                    bestFallback.score >= 180 &&
+                    (
+                        /dang tuong tac voi tu cach|interacting as|page|trang|studio|business|fanpage/.test(bestFallback.text || '') ||
+                        /privacy_mutation_token|av=|actor|composer/.test(bestFallback.href || '')
+                    )
+                );
 
-            let actor = await extractActor();
-            if (!actor) {
-                const composerSelectors = [
-                    'div[role="button"] span:has-text("Ban viet gi di")',
-                    'div[role="button"] span:has-text("What\'s on your mind")',
-                    'div[role="button"]:has-text("Ban viet gi di")',
-                    'div[role="button"]:has-text("Write something")'
+                return {
+                    actor: fallbackLooksStrong ? bestFallback.id : null,
+                    debug: {
+                        mode: 'fallback',
+                        topCandidates: topCandidates.slice(0, 5),
+                        topParams: Array.from(paramCandidates.values()).sort((a, b) => b.score - a.score).slice(0, 5)
+                    }
+                };
+            }, groupId);
+
+            const clickedComposer = await this.page.evaluate(() => {
+                const normalize = (value) => (value || '')
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/\u0111/g, 'd')
+                    .replace(/\u0110/g, 'D')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase();
+
+                const candidates = Array.from(document.querySelectorAll('div[role="button"], span[role="button"], button, div[tabindex="0"]'));
+                const phrases = [
+                    'ban viet gi di',
+                    'ban dang nghi gi',
+                    "what's on your mind",
+                    'write something',
+                    'tao bai viet cong khai',
+                    'create public post'
                 ];
 
-                for (const selector of composerSelectors) {
-                    try {
-                        const el = this.page.locator(selector).first();
-                        if (await el.isVisible()) {
-                            await el.click({ timeout: 2000 });
-                            await this.page.waitForTimeout(2500);
-                            actor = await extractActor();
-                            break;
-                        }
-                    } catch (e) {}
+                for (const el of candidates) {
+                    const text = normalize(el.innerText || el.getAttribute('aria-label') || el.getAttribute('title') || '');
+                    if (!phrases.some((phrase) => text.includes(phrase))) continue;
+                    el.click();
+                    return true;
                 }
+
+                return false;
+            });
+
+            if (clickedComposer) {
+                await this.page.waitForTimeout(2500);
+            }
+
+            let result = await extractActor();
+            let actor = result?.actor || null;
+
+            if (result?.debug) {
+                this.log(`[FB] Actor debug ${JSON.stringify(result.debug)}`);
             }
 
             return actor || null;
@@ -1057,5 +1233,3 @@ class FBAutomator {
 }
 
 module.exports = FBAutomator;
-
-
