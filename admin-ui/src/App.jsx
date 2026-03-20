@@ -179,6 +179,16 @@ function App() {
     }
   };
 
+  const selectByTag = (tag) => {
+    const next = new Set();
+    groups.forEach(g => {
+        if (g.isSelectable !== false && g.name.toLowerCase().includes(tag.toLowerCase())) {
+            next.add(g.url);
+        }
+    });
+    setSelectedGroups(next);
+  };
+
   return (
     <div className="min-h-screen flex flex-col pt-4 px-6 bg-gray-50 text-gray-800">
       <header className="flex justify-between items-center mb-6 border-b pb-4">
@@ -279,6 +289,17 @@ function App() {
           <div className="flex-1 overflow-y-auto p-2">
             {activeTab === 'my-groups' ? (
                 <div className="space-y-2">
+                   <div className="flex flex-wrap gap-1.5 p-2 bg-gray-50/50 rounded-lg border border-gray-100 mx-2">
+                       {['Cơ Khí', 'Thợ Hàn', 'Thiết kế nội thất', 'Kế Toán'].map(tag => (
+                           <button 
+                                key={tag}
+                                onClick={() => selectByTag(tag)}
+                                className="px-2 py-0.5 text-[9px] font-bold bg-white border border-gray-200 text-gray-600 rounded-md hover:border-blue-300 hover:text-blue-600 transition-all shadow-sm"
+                           >
+                               #{tag}
+                           </button>
+                       ))}
+                   </div>
                    <div className="px-2 py-1 flex justify-between items-center text-xs">
                       <span className="text-gray-500">Đã chọn: <strong>{selectedGroups.size}</strong></span>
                       <button onClick={toggleAll} className="text-blue-600 hover:underline">{selectedGroups.size === groups.length && groups.length > 0 ? 'Bỏ chọn' : 'Chọn hết'}</button>

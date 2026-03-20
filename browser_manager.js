@@ -51,7 +51,15 @@ class BrowserManager {
                     cleanLocksAndJournals(this.userDataDir);
 
                     console.log('[BrowserManager] Khởi tạo Browser Context duy nhất...');
-                    const exePath = 'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe';
+                    const chromePath = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe';
+                    const edgePath = 'C:\\Program Files (x86)\\Microsoft\\Edge\\Application\\msedge.exe';
+                    const coccocPath = 'C:\\Program Files\\CocCoc\\Browser\\Application\\browser.exe';
+                    
+                    let exePath = undefined;
+                    if (fs.existsSync(chromePath)) exePath = chromePath;
+                    else if (fs.existsSync(edgePath)) exePath = edgePath;
+                    else if (fs.existsSync(coccocPath)) exePath = coccocPath;
+
                     this.context = await chromium.launchPersistentContext(this.userDataDir, {
                         executablePath: exePath,
                         headless: false,

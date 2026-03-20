@@ -37,18 +37,17 @@ function parseFBTime(timeStr) {
 }
 
 async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
-    logCallback('[FB] Đang khởi tạo bộ quét Tìm kiếm thông minh (Song song)...');
+    logCallback('[FB] Đang khởi tạo bộ quét Tìm kiếm thông minh (Trang cá nhân)...');
     
     const page = await primaryContext.newPage();
-    const detailPage = await primaryContext.newPage(); // Sử dụng page riêng để tránh xung đột
     const allGroups = new Map();
-    let userIdToCheck = ''; // Sẽ lấy tự động
+    let userIdToCheck = 'me'; 
     const groupQueue = [];
     let isScanningDone = false;
 
     // --- Đọc lịch sử đăng bài cục bộ ---
     const historyPath = path.join(__dirname, 'posted_history.txt');
-    const localHistory = new Map(); // url -> timestamp
+    const localHistory = new Map(); 
     if (fs.existsSync(historyPath)) {
         const lines = fs.readFileSync(historyPath, 'utf-8').split('\n');
         for (const line of lines) {
@@ -63,167 +62,166 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
     try {
         logCallback('[FB] Đang xác định User ID của bạn...');
         await page.goto('https://www.facebook.com/me', { waitUntil: 'load', timeout: 30000 });
-        const currentUrl = page.url();
-        // Trích xuất ID từ URL (có thể là username hoặc ID số)
-        const idMatch = currentUrl.match(/profile\.php\?id=(\d+)/) || currentUrl.match(/facebook\.com\/([^\/\?]+)/);
-        if (idMatch) {
-            userIdToCheck = idMatch[1];
-            logCallback(`[FB] Đã xác định User ID: ${userIdToCheck}`);
+        
+        // Chờ Facebook chuyển hướng từ /me sang profile thật
+        await page.waitForFunction(() => {
+            const url = window.location.href;
+            return !url.endsWith('facebook.com/me') && !url.endsWith('facebook.com/me/');
+        }, { timeout: 15000 }).catch(() => {});
+
+        const userId = await page.evaluate(() => {
+            // Thử lấy từ Cookie (phổ biến và chính xác nhất)
+            const cookieMatch = document.cookie.match(/c_user=(\d+)/);
+            if (cookieMatch) return cookieMatch[1];
+            
+            // Thử lấy từ các biến nội bộ của Facebook (Comet)
+            try {
+                if (window.require) {
+                    const config = window.require('CometCurrentUserConfig');
+                    if (config && config.userID) return config.userID;
+                }
+            } catch (e) {}
+
+            // Cuối cùng mới lấy từ URL nếu chứa ID số
+            const urlMatch = window.location.href.match(/profile\.php\?id=(\d+)/);
+            if (urlMatch) return urlMatch[1];
+            
+            return null;
+        });
+
+        if (userId) {
+            userIdToCheck = userId;
+            logCallback(`[FB] Đã xác định User ID (Numeric): ${userIdToCheck}`);
         } else {
-            logCallback('[!] Không thể tự động lấy User ID. Sử dụng ID mặc định.');
-            userIdToCheck = '100063596562296';
+            // Fallback lấy username từ URL nếu không tìm thấy ID số
+            const currentUrl = page.url();
+            const usernameMatch = currentUrl.match(/facebook\.com\/([^\/\?]+)/);
+            if (usernameMatch && usernameMatch[1] !== 'me') {
+                userIdToCheck = usernameMatch[1];
+                logCallback(`[FB] Đã xác định User Username: ${userIdToCheck}`);
+            } else {
+                logCallback('[!] Không thể tự động lấy User ID. Sử dụng dự phòng "me".');
+                userIdToCheck = 'me';
+            }
         }
     } catch (e) {
-        logCallback(`[!] Lỗi khi lấy User ID: ${e.message}. Sử dụng ID mặc định.`);
-        userIdToCheck = '100063596562296';
+        logCallback(`[!] Lỗi khi lấy User ID: ${e.message}.`);
+        userIdToCheck = 'me';
     }
 
-    // --- Worker: Kiểm tra chi tiết nhóm song song ---
+    // --- Worker: Kiểm tra chi tiết nhóm ---
     const detailWorker = async () => {
         logCallback('[FB] Background Worker đã bắt đầu hoạt động...');
-        while (!isScanningDone || groupQueue.length > 0) {
-            if (groupQueue.length === 0) {
-                await new Promise(r => setTimeout(r, 1000));
-                continue;
-            }
-
-            const group = groupQueue.shift();
-            logCallback(`[FB] [Worker] Đang kiểm tra chi tiết: ${group.name}`);
-            
-            // KIỂM TRA LỊCH SỬ CỤC BỘ TRƯỚC
-            const lastPostTs = localHistory.get(group.url);
-            const oneDayAgo = Date.now() - 24 * 60 * 60 * 1000;
-            
-            if (lastPostTs && lastPostTs > oneDayAgo) {
-                logCallback(`[FB] [Worker] Nhóm ${group.name} đã có trong lịch sử đăng (vừa mới đăng).`);
-                group.isSelectable = false;
-                group.lastPostStatus = "Đã đăng (Lịch sử)";
-                group.postedTime = lastPostTs;
-                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
-                continue;
-            }
-
-            const checkUrl = `https://www.facebook.com/groups/${group.id}/user/${userIdToCheck}/`;
-            try {
-                // Sử dụng domcontentloaded để nhanh hơn và timeout dài hơn
-                await detailPage.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
-                await detailPage.waitForTimeout(2000);
-                
-                // Kiểm tra nếu bị redirect sang trang login
-                const isLogin = await detailPage.evaluate(() => {
-                    return document.body.innerText.includes('Đăng nhập') || !!document.querySelector('input[name="email"]');
-                });
-                
-                if (isLogin) {
-                    throw new Error('Trình duyệt bị đẩy ra trang Login. Vui lòng đăng nhập lại.');
-                }
-                
-                const details = await detailPage.evaluate(() => {
-                    const text = document.body.innerText;
-                    
-                    // Phát hiện trang bị chặn/không hiển thị
-                    if (text.includes('Trang này không hiển thị') || text.includes('This content isn\'t available right now')) {
-                        return { error: 'blocked' };
-                    }
-
-                    const mMatch = text.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i);
-                    const timeLinks = Array.from(document.querySelectorAll('a[role="link"]'))
-                        .filter(a => a.href.includes('/posts/') && a.innerText.length > 0)
-                        .map(a => a.innerText.trim());
-                    const latestTime = timeLinks.length > 0 ? timeLinks[0] : null;
-
-                    const noPostPatterns = ['Không có bài viết mới', 'No posts available', 'chưa đăng gì trong nhóm', 'Không tìm thấy kết quả', 'No results found'];
-                    const hasNoPost = noPostPatterns.some(p => text.includes(p));
-                    
-                    return {
-                        members: mMatch ? mMatch[0] : 'N/A',
-                        status: hasNoPost ? 'Chưa đăng' : 'Đã đăng',
-                        postedTimeStr: latestTime
-                    };
-                });
-
-                if (details.error === 'blocked') {
-                    logCallback(`[!] PHÁT HIỆN FACEBOOK CHẶN TRUY CẬP TRANG NÀY. Dừng worker để bảo vệ tài khoản.`);
-                    group.lastPostStatus = "Bị chặn (Thử lại sau)";
-                    isScanningDone = true; // Dừng các lượt quét tiếp theo
-                    return;
+        const detailPage = await primaryContext.newPage();
+        try {
+            while (!isScanningDone || groupQueue.length > 0) {
+                if (groupQueue.length === 0) {
+                    await new Promise(r => setTimeout(r, 1000));
+                    continue;
                 }
 
-                group.members = details.members || group.members;
-                if (!details.postedTimeStr || details.status === 'Chưa đăng') {
-                    group.postedTime = null;
-                    group.isSelectable = true;
-                    group.lastPostStatus = "Sẵn sàng (Chưa đăng)";
-                } else {
-                    const postDate = parseFBTime(details.postedTimeStr);
-                    group.postedTime = (postDate && typeof postDate.getTime === 'function') ? postDate.getTime() : null;
-                    let isSelectable = false;
-                    const today = new Date();
-                    today.setHours(0, 0, 0, 0); // Đặt về đầu ngày hiện tại (00:00:00)
+                const group = groupQueue.shift();
+                logCallback(`[FB] [Worker] Đang kiểm tra chi tiết: ${group.name}`);
+                
+                const lastPostTs = localHistory.get(group.url);
+                const twoDaysAgo = Date.now() - 2 * 24 * 60 * 60 * 1000;
+                
+                if (lastPostTs && lastPostTs > twoDaysAgo) {
+                    group.postedTime = new Date(lastPostTs).toLocaleString('vi-VN');
+                    group.lastPostStatus = 'Đã đăng (trong 2 ngày)';
+                    group.isSelectable = false;
+                    logCallback(`[FB] [Worker] Bỏ qua ${group.name} (Đã đăng trong 48h qua)`);
+                    continue;
+                }
 
-                    if (!postDate) {
-                        isSelectable = true; // Không lấy được thời gian coi như chưa đăng
+                try {
+                    const checkUrl = `${group.url.replace(/\/$/, '')}/user/${userIdToCheck}/`;
+                    logCallback(`[FB] [Worker] Đang check bài tại: ${checkUrl}`);
+                    await detailPage.goto(checkUrl, { waitUntil: 'domcontentloaded', timeout: 60000 });
+                    await detailPage.waitForTimeout(2000);
+                    
+                    const detail = await detailPage.evaluate(() => {
+                        const postEls = Array.from(document.querySelectorAll('div[role="feed"] [role="article"], div[role="main"] [role="article"]'));
+                        let newestTs = null;
+                        if (postEls.length > 0) {
+                            const timeEl = postEls[0].querySelector('a[href*="/posts/"] span, a[href*="/groups/"] span');
+                            if (timeEl) newestTs = timeEl.innerText;
+                        }
+                        
+                        const memberEl = Array.from(document.querySelectorAll('span, div')).find(el => 
+                            el.innerText && el.innerText.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i)
+                        );
+                        
+                        return {
+                            timeStr: newestTs,
+                            memberStr: memberEl ? memberEl.innerText.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i)[0] : 'N/A'
+                        };
+                    });
+
+                    group.members = detail.memberStr;
+                    const parsedTime = parseFBTime(detail.timeStr);
+                    if (parsedTime) {
+                        group.postedTime = parsedTime.toLocaleString('vi-VN');
+                        if (parsedTime.getTime() > twoDaysAgo) {
+                            group.lastPostStatus = 'Đã có bài mới (trong 2 ngày)';
+                            group.isSelectable = false;
+                        } else {
+                            group.lastPostStatus = 'Sẵn sàng (> 2 ngày)';
+                            group.isSelectable = true;
+                        }
                     } else {
-                        const postD = new Date(postDate);
-                        postD.setHours(0, 0, 0, 0);
-                        // Chỉ thỏa mãn khi ngày đăng (postD) bé hơn NGÀY HIỆN TẠI (today)
-                        isSelectable = postD.getTime() < today.getTime();
+                        group.lastPostStatus = 'Sẵn sàng (Chưa rõ ngày)';
+                        group.isSelectable = true;
                     }
-
-                    group.isSelectable = isSelectable;
-                    group.lastPostStatus = isSelectable ? `Sẵn sàng (${details.postedTimeStr})` : `Chờ (${details.postedTimeStr})`;
+                    
+                    logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_updated', group })}`);
+                } catch (e) {
+                    if (e.message.includes('Target page, context or browser has been closed')) {
+                        logCallback(`[!] [Worker] Trình duyệt hoặc Trang đã bị đóng đột ngột. Dừng worker.`);
+                        return; // Dừng hẳn worker
+                    }
+                    logCallback(`[!] Lỗi check chi tiết ${group.name}: ${e.message}`);
+                    group.lastPostStatus = 'Lỗi check bài';
+                    group.isSelectable = true;
                 }
 
-                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
-                fs.writeFileSync('groups_data.json', JSON.stringify(Array.from(allGroups.values()), null, 2));
-            } catch (err) {
-                console.error(`[Scanning Error] Lỗi check nhóm ${group.name}:`, err);
-                logCallback(`[!] Lỗi check nhóm ${group.name}: ${err.message}`);
-                // Nếu lỗi, tạm thời đánh dấu là chờ
-                group.lastPostStatus = "Lỗi check (Thử lại sau)";
-                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: group })}`);
+                const delay = Math.floor(Math.random() * 5000) + 5000;
+                await new Promise(r => setTimeout(r, delay));
             }
-
-            // Nghỉ an toàn ngẫu nhiên 10-20 giây giữa các lần check nhóm để tránh SPAM block
-            const delay = Math.floor(Math.random() * 10000) + 10000;
-            logCallback(`[FB] Nghỉ an toàn ${Math.floor(delay/1000)}s tiếp theo...`);
-            await new Promise(r => setTimeout(r, delay));
+        } finally {
+            try { await detailPage.close(); } catch(e) {}
+            logCallback('[FB] Worker đã hoàn tất công việc.');
         }
-        logCallback('[FB] Worker đã hoàn tất công việc.');
     };
 
-    // Chạy worker ngầm
     const workerPromise = detailWorker();
 
     try {
-        const searchUrl = `https://www.facebook.com/groups/joins/?nav_source=tab`;
+        const searchUrl = `https://www.facebook.com/${userIdToCheck}/groups`;
         logCallback(`[FB] Truy cập trang quản lý nhóm: ${searchUrl}`);
         await page.goto(searchUrl, { waitUntil: 'load', timeout: 90000 });
         
         const isLoginPage = await page.evaluate(() => document.body.innerText.includes('Đăng nhập') || document.querySelector('input[name="email"]'));
         if (isLoginPage) {
-            logCallback('[!] Bạn chưa đăng nhập. Vui lòng đăng nhập trên Cốc Cốc.');
+            logCallback('[!] Bạn chưa đăng nhập. Vui lòng đăng nhập...');
             await page.waitForFunction(() => !document.querySelector('input[name="email"]'), { timeout: 300000 });
             await page.goto(searchUrl, { waitUntil: 'load' });
         }
 
         await page.waitForTimeout(5000);
-        logCallback(`[FB] GIAI ĐOẠN 1: Bắt đầu lướt và thu thập nhóm...`);
+        logCallback(`[FB] GIAI ĐOẠN 1: Bắt đầu thu thập nhóm từ Trang cá nhân...`);
 
-        let lastHeight = 0;
+        let lastGroupCount = 0;
         let stagnantCount = 0;
         const maxScrollAttempts = 400;
 
         for (let i = 0; i < maxScrollAttempts; i++) {
             const discovered = await page.evaluate((kw) => {
                 const results = [];
-                // Lấy tất cả listitem để bóc tách thông tin đi kèm
-                const listItems = Array.from(document.querySelectorAll('div[role="listitem"]'));
+                const seenIds = new Set();
+                const allGroupLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
                 
-                for (const item of listItems) {
-                    const a = item.querySelector('a[href*="/groups/"]');
-                    if (!a) continue;
-                    
+                for (const a of allGroupLinks) {
                     const href = a.href;
                     if (href.includes('/user/') || href.includes('/posts/') || 
                         href.includes('/groups/feed/') || href.includes('/groups/discover/') ||
@@ -231,29 +229,32 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
                         href.endsWith('/groups/') || href.includes('/groups/joins/')) continue;
 
                     const idMatch = href.match(/\/groups\/(\d+)\/?/) || href.match(/\/groups\/([^\/\?]+)/);
-                    if (idMatch) {
-                        const id = idMatch[1];
-                        const nameEl = a.querySelector('span[dir="auto"]') || a;
-                        const name = nameEl.innerText.trim();
-                        
-                        if (name.toLowerCase() === 'xem nhóm' || name.toLowerCase() === 'view group' || 
-                            name.toLowerCase() === 'tham gia nhóm' || name.toLowerCase() === 'join group') continue;
-                        
-                        // LỌC CHÍNH XÁC: Tên phải chứa cụm từ người dùng nhập
-                        if (kw && !name.toLowerCase().includes(kw.toLowerCase())) continue;
-                        
-                        if (name.length > 2 && name.length < 150) {
-                            // Bóc tách số lượng thành viên từ text của item
-                            const itemText = item.innerText;
-                            const mMatch = itemText.match(/(\d+[.,]?\d*[KM]?)\s*(thành viên|members)/i);
-                            
-                            results.push({ 
-                                id, 
-                                name, 
-                                url: `https://www.facebook.com/groups/${id}/`,
-                                members: mMatch ? mMatch[0] : 'N/A'
-                            });
-                        }
+                    if (!idMatch) continue;
+                    
+                    const id = idMatch[1];
+                    if (seenIds.has(id)) continue;
+
+                    let name = '';
+                    const nameEl = a.querySelector('span[dir="auto"]');
+                    if (nameEl) {
+                        name = nameEl.innerText.trim();
+                    } else {
+                        name = a.innerText.trim();
+                    }
+                    
+                    if (name.includes('Lần hoạt động')) name = name.split('Lần hoạt động')[0].trim();
+                    
+                    if (name.toLowerCase() === 'xem nhóm' || name.toLowerCase() === 'view group') continue;
+                    if (kw && !name.toLowerCase().includes(kw.toLowerCase())) continue;
+                    
+                    if (name.length > 2 && name.length < 150) {
+                        results.push({ 
+                            id, 
+                            name, 
+                            url: `https://www.facebook.com/groups/${id}/`,
+                            members: 'N/A'
+                        });
+                        seenIds.add(id);
                     }
                 }
                 return results;
@@ -261,46 +262,36 @@ async function execGetGroups(primaryContext, keyword, logCallback = () => {}) {
 
             for (const g of discovered) {
                 if (!allGroups.has(g.url)) {
-                    const groupData = {
-                        id: g.id,
-                        name: g.name,
-                        url: g.url,
-                        members: g.members || 'N/A',
-                        postedTime: null,
-                        lastPostStatus: 'Đang xếp hàng...',
-                        isSelectable: false
-                    };
+                    const groupData = { ...g, postedTime: null, lastPostStatus: 'Hàng đợi...', isSelectable: false };
                     allGroups.set(g.url, groupData);
-                    groupQueue.push(groupData); // Đưa vào hàng đợi
+                    groupQueue.push(groupData);
                     logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: groupData })}`);
                 }
             }
 
-            // Scroll xuống
-            await page.mouse.wheel(0, 4000);
+            await page.evaluate(() => window.scrollTo(0, document.body.scrollHeight));
+            await page.waitForTimeout(1000);
+            await page.keyboard.press('PageDown');
             await page.waitForTimeout(2000);
 
-            const currentHeight = await page.evaluate(() => document.body.scrollHeight);
-            if (currentHeight === lastHeight) stagnantCount++;
-            else { stagnantCount = 0; lastHeight = currentHeight; }
-
-            if (i % 5 === 0) logCallback(`[FB] Đang quét... Tìm thấy ${allGroups.size} nhóm. Queue: ${groupQueue.length}`);
-            if (stagnantCount >= 10 && i > 5) break;
+            const currentCount = allGroups.size;
+            if (currentCount === lastGroupCount) stagnantCount++;
+            else { stagnantCount = 0; lastGroupCount = currentCount; }
+            if (i % 5 === 0) logCallback(`[FB] Đang quét... Tìm thấy ${allGroups.size} nhóm.`);
+            if (stagnantCount >= 12 && i > 5) break;
         }
 
         isScanningDone = true;
-        logCallback(`[FB] GIAI ĐOẠN 1 XONG. Đang chờ xử lý nốt ${groupQueue.length} nhóm trong hàng đợi...`);
-        
-        // Đợi worker hoàn tất
         await workerPromise;
-        
         logCallback(`\n[FB] HOÀN TẤT TOÀN BỘ QUY TRÌNH!`);
     } catch (e) {
         logCallback(`Lỗi: ${e.message}`);
     } finally {
-        // Đảm bảo đóng các page
-        // try { await page.close(); } catch(e) {}
-        // try { await detailPage.close(); } catch(e) {}
+        isScanningDone = true;
+        if (workerPromise) {
+            await workerPromise.catch(() => {});
+        }
+        try { await page.close(); } catch(e) {}
     }
 }
 

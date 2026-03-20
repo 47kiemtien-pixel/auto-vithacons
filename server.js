@@ -45,7 +45,11 @@ app.get('/api/groups', (req, res) => {
 
 // API Quét danh sách nhóm đã tham gia từ FB
 app.post('/api/fetch-groups', async (req, res) => {
-    // Cho phép chạy song song với các tiến trình khác
+    // Ngăn chặn chạy song song nếu đã có tiến trình quét đang chạy
+    if (isScanning) {
+        return res.status(400).json({ error: 'Tiến trình quét đang chạy, vui lòng đợi cho đến khi hoàn tất.' });
+    }
+    
     isScanning = true;
     const keyword = req.body.keyword || '';
     broadcastLog({ type: 'info', message: `Bắt đầu quét nhóm đã tham gia với từ khóa: "${keyword}"`, source: 'scanning' });
@@ -127,9 +131,9 @@ app.post('/api/post', async (req, res) => {
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });
             
-            // Nếu đăng thành công, cập nhật trạng thái ngay lập tức vào file và danh sách hiện tại
+            // Nếu đăng thành công, Xóa nhóm đó khỏi danh sách đã quét luôn
             if (event.type === 'success' && event.groupUrl) {
-                updateGroupStatusLocally(event.groupUrl, event.status === 'pending' ? 'Chờ phê duyệt' : 'Đã đăng');
+                removeGroupAfterSuccess(event.groupUrl);
             }
         }, context, postContent, imageFolderPath);
     } catch (e) {
@@ -140,32 +144,26 @@ app.post('/api/post', async (req, res) => {
     }
 });
 
-// Hàm cập nhật trạng thái nhóm cục bộ mà không cần quét lại
-function updateGroupStatusLocally(groupUrl, statusText) {
+// Hàm xóa nhóm khỏi danh sách cục bộ sau khi đăng bài xong
+function removeGroupAfterSuccess(groupUrl) {
     const dataPath = path.join(__dirname, 'groups_data.json');
     if (fs.existsSync(dataPath)) {
         try {
             let data = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
-            let found = false;
-            data = data.map(g => {
-                if (g.url === groupUrl) {
-                    g.isSelectable = false;
-                    g.lastPostStatus = statusText;
-                    found = true;
-                }
-                return g;
-            });
-            if (found) {
+            const initialLength = data.length;
+            data = data.filter(g => g.url !== groupUrl);
+            
+            if (data.length < initialLength) {
                 fs.writeFileSync(dataPath, JSON.stringify(data, null, 2));
-                // Thông báo cho UI cập nhật dòng đó ngay lập tức
+                // Thông báo cho UI để lọc bỏ (mặc dù frontend đã có logic này nhưng đồng bộ lại cho chắc)
                 broadcastLog({ 
-                    type: 'group_found', 
-                    group: data.find(g => g.url === groupUrl), 
-                    source: 'scanning' // UI thường nghe source này để cập nhật list
+                    type: 'success', 
+                    message: `[Hệ thống] Đã xóa nhóm khỏi danh sách quét: ${groupUrl}`,
+                    groupUrl: groupUrl
                 });
             }
         } catch (e) {
-            console.error('[Server] Lỗi cập nhật status cục bộ:', e);
+            console.error('Lỗi khi cập nhật file data:', e);
         }
     }
 }
