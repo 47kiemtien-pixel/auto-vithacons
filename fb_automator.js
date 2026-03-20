@@ -450,10 +450,115 @@ class FBAutomator {
                 let uploadConfirmed = false;
                 let attachedByInput = false;
 
+                const getUploadInputMetas = async () => {
+                    const fileInputs = this.page.locator('input[type="file"]');
+                    const inputCount = await fileInputs.count();
+                    const metas = [];
+
+                    for (let i = 0; i < inputCount; i++) {
+                        const input = fileInputs.nth(i);
+                        const meta = await input.evaluate((el, idx) => ({
+                            index: idx,
+                            accept: el.getAttribute('accept') || '',
+                            multiple: el.hasAttribute('multiple'),
+                            inDialog: Boolean(el.closest('div[role="dialog"]')),
+                            disabled: Boolean(el.disabled),
+                            hiddenByStyle: window.getComputedStyle(el).display === 'none' || window.getComputedStyle(el).visibility === 'hidden'
+                        }), i).catch(() => null);
+                        if (meta) metas.push(meta);
+                    }
+
+                    return metas.filter((meta) => !meta.disabled && (!meta.accept || /image|png|jpg|jpeg|webp/i.test(meta.accept)));
+                };
+
+                const tryAttachViaInputAncestorClick = async () => {
+                    const metas = await getUploadInputMetas();
+                    const dialogMetas = metas.filter((meta) => meta.inDialog);
+                    this.log(`[FB] Co ${dialogMetas.length} input file hop le trong dialog de thu click ancestor.`);
+
+                    for (const meta of dialogMetas) {
+                        try {
+                            const input = this.page.locator('input[type="file"]').nth(meta.index);
+                            this.log(`[FB] Thu kich filechooser truc tiep tu input #${meta.index + 1}.`);
+
+                            await input.evaluate((el) => {
+                                el.style.display = 'block';
+                                el.style.visibility = 'visible';
+                                el.style.opacity = '0.01';
+                                el.style.position = 'fixed';
+                                el.style.left = '16px';
+                                el.style.top = '16px';
+                                el.style.width = '24px';
+                                el.style.height = '24px';
+                                el.style.zIndex = '2147483647';
+                            }).catch(() => {});
+
+                            const directChooser = await Promise.all([
+                                this.page.waitForEvent('filechooser', { timeout: 2500 }).catch(() => null),
+                                input.click({ force: true, timeout: 2500 }).catch(() => null)
+                            ]).then(([chooser]) => chooser);
+
+                            if (directChooser) {
+                                await directChooser.setFiles(imagePaths);
+                                attachedByInput = true;
+                                this.log(`[FB] Da nap anh qua filechooser truc tiep tu input #${meta.index + 1}.`);
+                                return true;
+                            }
+
+                            const clickableHandle = await input.evaluateHandle((el) => {
+                                let current = el.parentElement;
+                                while (current) {
+                                    const role = current.getAttribute('role');
+                                    const tabIndex = current.getAttribute('tabindex');
+                                    const ariaLabel = current.getAttribute('aria-label') || '';
+                                    if (
+                                        current.tagName === 'LABEL' ||
+                                        role === 'button' ||
+                                        tabIndex === '0' ||
+                                        /anh|photo|video|upload|them/i.test(ariaLabel)
+                                    ) {
+                                        return current;
+                                    }
+                                    current = current.parentElement;
+                                }
+                                return null;
+                            });
+
+                            const clickableElement = clickableHandle.asElement();
+                            if (!clickableElement) {
+                                this.log(`[FB] Khong tim thay ancestor clickable cho input #${meta.index + 1}.`);
+                                continue;
+                            }
+
+                            this.log(`[FB] Thu click ancestor cua input #${meta.index + 1} de mo upload that.`);
+                            const [fileChooser] = await Promise.all([
+                                this.page.waitForEvent('filechooser', { timeout: 2500 }).catch(() => null),
+                                clickableElement.click({ timeout: 2500 }).catch(() => null)
+                            ]);
+
+                            if (!fileChooser) {
+                                this.log(`[FB] Ancestor cua input #${meta.index + 1} khong mo ra filechooser.`);
+                                continue;
+                            }
+
+                            await fileChooser.setFiles(imagePaths);
+                            attachedByInput = true;
+                            this.log(`[FB] Da nap anh qua filechooser tu ancestor input #${meta.index + 1}.`);
+                            return true;
+                        } catch (e) {
+                            this.log(`[FB] Click ancestor cua input that bai: ${e.message}`);
+                        }
+                    }
+
+                    return false;
+                };
+
                 const tryAttachToVisibleInputs = async (scopeLabel) => {
                     const fileInputs = this.page.locator('input[type="file"]');
                     const inputCount = await fileInputs.count();
                     this.log(`[FB] Tim thay ${inputCount} input file o scope ${scopeLabel}.`);
+
+                    let triedCount = 0;
 
                     for (let i = 0; i < inputCount; i++) {
                         const input = fileInputs.nth(i);
@@ -477,9 +582,14 @@ class FBAutomator {
                                 continue;
                             }
 
+                            triedCount++;
                             this.log(`[FB] Thu input file #${i + 1} | inDialog=${meta.inDialog} | multiple=${meta.multiple} | hidden=${meta.hiddenByStyle} | accept=${meta.accept || 'n/a'}`);
 
                             await input.setInputFiles(meta.multiple ? imagePaths : [imagePaths[0]], { timeout: 5000 });
+                            await input.evaluate((el) => {
+                                el.dispatchEvent(new Event('input', { bubbles: true }));
+                                el.dispatchEvent(new Event('change', { bubbles: true }));
+                            }).catch(() => {});
                             await sleep(700);
 
                             const filesLength = await input.evaluate((el) => el.files?.length || 0).catch(() => 0);
@@ -492,6 +602,11 @@ class FBAutomator {
                             this.log(`[FB] Input file #${i + 1} khong giu tep sau setInputFiles.`);
                         } catch (e) {
                             this.log(`[FB] Input file #${i + 1} khong dung duoc: ${e.message}`);
+                        }
+
+                        if (scopeLabel === 'page' && triedCount >= 1) {
+                            this.log('[FB] Da thu 1 input file ngoai dialog, dung fallback de tranh cham.');
+                            break;
                         }
                     }
                     return false;
@@ -564,9 +679,12 @@ class FBAutomator {
                     return false;
                 };
 
-                const photoButtonClicked = await clickPhotoButton();
+                let openedRealUploadFlow = await tryAttachViaInputAncestorClick();
+
+                const fileChooserPromise = openedRealUploadFlow ? Promise.resolve(null) : this.page.waitForEvent('filechooser', { timeout: 2500 }).catch(() => null);
+                const photoButtonClicked = openedRealUploadFlow ? false : await clickPhotoButton();
                 if (photoButtonClicked) {
-                    const fileChooser = await this.page.waitForEvent('filechooser', { timeout: 4000 }).catch(() => null);
+                    const fileChooser = await fileChooserPromise;
                     if (fileChooser) {
                         await fileChooser.setFiles(imagePaths);
                         attachedByInput = true;
@@ -576,7 +694,9 @@ class FBAutomator {
                     }
                     await sleep(700);
                 } else {
-                    this.log('[FB] Khong bam duoc nut anh/video, se fallback sang input file truc tiep.');
+                    if (!openedRealUploadFlow) {
+                        this.log('[FB] Khong bam duoc nut anh/video, se fallback sang input file truc tiep.');
+                    }
                 }
 
                 if (!attachedByInput && !await tryAttachToVisibleInputs('dialog')) {
@@ -584,7 +704,7 @@ class FBAutomator {
                 }
 
                 await sleep(700);
-                uploadConfirmed = await this.page.waitForFunction(() => {
+                uploadConfirmed = attachedByInput || await this.page.waitForFunction(() => {
                     const dialog = document.querySelector('div[role="dialog"]');
                     if (!dialog) return false;
 
@@ -604,7 +724,7 @@ class FBAutomator {
                     ];
                     const hasAttachmentPreview = selectors.some((selector) => dialog.querySelector(selector));
                     return hasAttachedFile || hasAttachmentPreview;
-                }, { timeout: 20000 }).then(() => true).catch(() => false);
+                }, { timeout: 6000 }).then(() => true).catch(() => false);
                 this.log(`[FB] Ket qua xac nhan upload anh: ${uploadConfirmed ? 'OK' : 'KHONG THAY ATTACHMENT'} | attachedByInput=${attachedByInput}`);
                 await sleep(700);
 

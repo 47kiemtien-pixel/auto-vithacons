@@ -11,6 +11,7 @@ const FAST_GROUP_DELAY_MAX_MS = 30000;
 async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '') {
     const fs = require('fs');
     const path = require('path');
+    let consecutiveImageUploadFailures = 0;
     
     // Äá»c danh sÃ¡ch nhÃ³m cáº¥m link
     const antiLinkPath = path.join(__dirname, 'anti_link_groups.txt');
@@ -128,6 +129,7 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
             });
             
             if (result && result.success) {
+                consecutiveImageUploadFailures = 0;
                 // Ghi vÃ o file lá»‹ch sá»­ Ä‘á»ƒ cÃ´ng cá»¥ get_groups khÃ´ng láº¥y láº¡i, kÃ¨m thá»i gian Ä‘Äƒng
                 const historyPath = path.join(__dirname, 'posted_history.txt');
                 const timestamp = Date.now();
@@ -194,22 +196,33 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                         antiLinkGroups.add(groupUrl);
                     }
                 } else if (result && result.reason === 'image_upload_failed') {
+                    consecutiveImageUploadFailures += 1;
                     const msg = 'âŒ Upload áº£nh chÆ°a thÃ nh cÃ´ng. Bot Ä‘Ã£ dá»«ng trÆ°á»›c khi báº¥m ÄÄƒng Ä‘á»ƒ trÃ¡nh bÃ i chá»‰ cÃ³ ná»™i dung.';
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'image_upload_failed' });
+                    if (consecutiveImageUploadFailures >= 3) {
+                        const stopMsg = 'Dung batch dang bai vi upload anh that bai lien tiep 3 nhom. Kha nang cao la luong upload dang loi toan cuc.';
+                        console.log(`[Main] ${stopMsg}`);
+                        logCallback({ type: 'error', message: `[Main] ${stopMsg}`, groupUrl, status: 'stopped_after_repeated_image_failures' });
+                        break;
+                    }
                 } else if (result && result.reason === 'composer_not_found') {
+                    consecutiveImageUploadFailures = 0;
                     const msg = 'âŒ KhÃ´ng tÃ¬m tháº¥y Ã´ má»Ÿ há»™p soáº¡n bÃ i trong nhÃ³m.';
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'composer_not_found' });
                 } else if (result && result.reason === 'textbox_not_found') {
+                    consecutiveImageUploadFailures = 0;
                     const msg = 'âŒ ÄÃ£ má»Ÿ há»™p Ä‘Äƒng nhÆ°ng khÃ´ng nháº­p Ä‘Æ°á»£c ná»™i dung vÃ o Ã´ soáº¡n bÃ i.';
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'textbox_not_found' });
                 } else if (result && result.reason === 'submit_button_not_found') {
+                    consecutiveImageUploadFailures = 0;
                     const msg = 'âŒ KhÃ´ng tÃ¬m tháº¥y nÃºt ÄÄƒng hoáº·c nÃºt bá»‹ khÃ³a quÃ¡ lÃ¢u.';
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'submit_button_not_found' });
                 } else {
+                    consecutiveImageUploadFailures = 0;
                     const msg = `[Main] ÄÄƒng bÃ i tháº¥t báº¡i. LÃ½ do: ${result?.reason || 'unknown'}`;
                     console.log(msg);
                     logCallback({ type: 'error', message: msg, groupUrl, status: 'failed' });

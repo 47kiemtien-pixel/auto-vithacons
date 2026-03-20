@@ -291,10 +291,22 @@ async function startPendingCheckWorker() {
                 lastPostStatus: 'Dang check bai...',
                 isSelectable: false
             };
+
+            if (isPosting) {
+                await new Promise((resolve) => setTimeout(resolve, 1000));
+                continue;
+            }
+
             upsertGroupData(workingGroup);
             broadcastLog({ type: 'group_updated', group: workingGroup, source: 'checking' });
 
             try {
+                if (isPosting) {
+                    upsertGroupData(nextGroup);
+                    await new Promise((resolve) => setTimeout(resolve, 1000));
+                    continue;
+                }
+
                 const actorForGroup = await automator.getActorFromGroupContext(workingGroup.url) || await automator.getCurrentUserId();
                 const checkUrl = `${workingGroup.url.replace(/\/$/, '')}/user/${actorForGroup}/`;
                 workingGroup.actorIdUsed = actorForGroup;
