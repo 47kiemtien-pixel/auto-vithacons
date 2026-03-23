@@ -150,7 +150,7 @@ function upsertGroupData(group, pageId) {
     if (!group || !group.url) return;
     const groups = readGroupsData(pageId);
     const index = groups.findIndex((g) => g.url === group.url);
-    if (index === -1) groups.push({ ...group, isSelectable: true });
+    if (index === -1) groups.push(group);
     else groups[index] = { ...groups[index], ...group };
     writeGroupsData(groups, pageId);
 }
@@ -262,7 +262,16 @@ app.get('/api/pages', (req, res) => {
 
 app.get('/api/groups', (req, res) => {
     const pageId = req.query.pageId;
-    res.json(readGroupsData(pageId));
+    const groups = readGroupsData(pageId);
+    const processed = groups.map(g => {
+        const lastPost = g.lastBotPostedAt || 0;
+        const diffHours = (Date.now() - lastPost) / (1000 * 60 * 60);
+        return {
+            ...g,
+            isSelectable: diffHours >= 48
+        };
+    });
+    res.json(processed);
 });
 
 app.get('/api/settings', (req, res) => {
@@ -404,12 +413,18 @@ function markGroupAfterSuccess(groupUrl, status = 'published', pageId) {
         ...groups[index],
         lastBotPostedAt: ts,
         postedTime: formatDateTimeVN(ts),
-        isSelectable: true,
+        // isSelectable will be calculated by the client or when served via API
         lastPostStatus: status === 'pending' ? 'Đang chờ duyệt' : 'Đã đăng'
     };
+    delete updated.isSelectable; // remove stale flag if exists
     groups[index] = updated;
     writeGroupsData(groups, pageId);
-    broadcastLog({ type: 'group_updated', group: updated, source: 'posting' });
+    
+    // Calculate final isSelectable before broadcasting
+    const diffHours = (Date.now() - (updated.lastBotPostedAt || 0)) / (1000 * 60 * 60);
+    const finalGroup = { ...updated, isSelectable: diffHours >= 48 };
+    
+    broadcastLog({ type: 'group_updated', group: finalGroup, source: 'posting' });
 }
 
 function broadcastLog(event) {

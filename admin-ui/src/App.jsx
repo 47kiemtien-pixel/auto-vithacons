@@ -249,6 +249,9 @@ function App() {
 
 
   const toggleSelect = (url) => {
+    const group = groups.find(g => g.url === url);
+    if (group && group.isSelectable === false) return;
+
     const next = new Set(selectedGroups);
     if (next.has(url)) next.delete(url); else next.add(url);
     setSelectedGroups(next);
