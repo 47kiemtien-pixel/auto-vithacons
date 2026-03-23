@@ -148,7 +148,11 @@ function App() {
         }
         
         if (data.type === 'success' && data.groupUrl) {
-          setSuccessGroups(prev => [...new Set([...prev, data.groupUrl])]);
+          setSuccessGroups(prev => {
+            const exists = prev.find(item => item.url === data.groupUrl);
+            if (exists) return prev;
+            return [...prev, { url: data.groupUrl, status: data.status || 'published' }];
+          });
           setSelectedGroups(prev => {
             const next = new Set(prev);
             next.delete(data.groupUrl);

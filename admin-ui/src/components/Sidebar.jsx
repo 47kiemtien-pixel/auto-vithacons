@@ -12,10 +12,17 @@ const Sidebar = ({
 }) => {
   const [searchMyGroups, setSearchMyGroups] = useState('');
   const [searchDiscovery, setSearchDiscovery] = useState('');
+  const [statusFilter, setStatusFilter] = useState('all');
 
-  const filteredMyGroups = groups.filter(g => 
-    (g.name || '').toLowerCase().includes(searchMyGroups.toLowerCase())
-  );
+  const filteredMyGroups = groups.filter(g => {
+    const nameMatch = (g.name || '').toLowerCase().includes(searchMyGroups.toLowerCase());
+    if (!nameMatch) return false;
+    if (statusFilter === 'all') return true;
+    if (statusFilter === 'ready') return !g.lastPostStatus;
+    if (statusFilter === 'posted') return g.lastPostStatus === 'Đã đăng';
+    if (statusFilter === 'pending') return g.lastPostStatus === 'Đang chờ duyệt' || g.lastPostStatus === 'Chờ duyệt';
+    return true;
+  });
 
   return (
     <div className="flex flex-col h-full bg-base-100 rounded-3xl shadow-xl overflow-hidden border border-base-content/5">
@@ -139,12 +146,31 @@ const Sidebar = ({
         <div className="flex-1 overflow-y-auto p-4 space-y-3 terminal-scroll">
            {activeTab === 'my-groups' ? (
              <>
-               <div className="flex justify-between items-center mb-1">
-                 <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Đã chọn: {selectedGroups.size}</span>
-                 <button onClick={toggleAll} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 uppercase tracking-tighter">
-                   {selectedGroups.size === groups.length && groups.length > 0 ? 'Bỏ chọn hết' : 'Chọn tất cả'}
-                 </button>
-               </div>
+                <div className="flex flex-wrap gap-1 mb-3">
+                  {[
+                    { id: 'all', label: 'Tất cả', color: 'bg-base-300' },
+                    { id: 'ready', label: 'Sẵn sàng', color: 'bg-emerald-500/20 text-emerald-600' },
+                    { id: 'posted', label: 'Đã đăng', color: 'bg-blue-500/20 text-blue-600' },
+                    { id: 'pending', label: 'Chờ duyệt', color: 'bg-amber-500/20 text-amber-600' }
+                  ].map(f => (
+                    <button
+                      key={f.id}
+                      onClick={() => setStatusFilter(f.id)}
+                      className={`px-2 py-1 rounded-lg text-[9px] font-bold uppercase transition-all ${
+                        statusFilter === f.id ? `${f.color} ring-1 ring-current` : 'bg-base-200 opacity-60 hover:opacity-100'
+                      }`}
+                    >
+                      {f.label}
+                    </button>
+                  ))}
+                </div>
+
+                <div className="flex justify-between items-center mb-1">
+                  <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Đã chọn: {selectedGroups.size} / {filteredMyGroups.length}</span>
+                  <button onClick={toggleAll} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 uppercase tracking-tighter">
+                    {selectedGroups.size === filteredMyGroups.length && filteredMyGroups.length > 0 ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                  </button>
+                </div>
                {filteredMyGroups.length === 0 ? (
                  <div className="text-center py-10 text-slate-500 text-xs italic">Không tìm thấy nhóm nào.</div>
                ) : filteredMyGroups.map(g => (

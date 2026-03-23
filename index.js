@@ -127,9 +127,9 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                 consecutiveImageUploadFailures = 0;
                 
                 if (result.pending) {
-                    const msg = `[Main] Đăng xong, nhưng Facebook báo ĐANG CHỜ PHÊ DUYỆT. Không ghi vào lịch sử thành công.`;
+                    const msg = `[Main] Đăng xong, chờ Facebook phê duyệt. Đã ghi vào lịch sử.`;
                     console.log(msg);
-                    logCallback({ type: 'warning', message: msg, groupUrl, status: 'pending' });
+                    logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
                 } else {
                     const msg = `[Main] Đăng thành công! Đang đợi 3 giây để kiểm tra nhanh trạng thái bài...`;
                     console.log(msg);
