@@ -241,9 +241,30 @@ function App() {
     else setSelectedGroups(new Set(availableGroups.map(g => g.url)));
   };
 
-  const selectByTag = (tag) => {
-    const next = new Set();
-    groups.forEach(g => { if (g.isSelectable !== false && (g.name || '').toLowerCase().includes(tag.toLowerCase())) next.add(g.url); });
+  const toggleByTag = (input) => {
+    if (!input) return;
+    const tags = input.split(/[,;\s]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+    if (tags.length === 0) return;
+
+    const matchingGroups = groups.filter(g => {
+      const name = (g.name || '').toLowerCase();
+      return tags.some(tag => name.includes(tag));
+    });
+
+    if (matchingGroups.length === 0) return;
+
+    const allMatchingSelected = matchingGroups.every(g => selectedGroups.has(g.url));
+    const next = new Set(selectedGroups);
+
+    if (allMatchingSelected) {
+      // Nếu tất cả đã chọn -> Bỏ chọn toàn bộ
+      matchingGroups.forEach(g => next.delete(g.url));
+    } else {
+      // Nếu có nhóm chưa chọn -> Chọn tất cả (những nhóm hợp lệ)
+      matchingGroups.forEach(g => {
+        if (g.isSelectable !== false) next.add(g.url);
+      });
+    }
     setSelectedGroups(next);
   };
 
@@ -319,7 +340,7 @@ function App() {
                selectedGroups={selectedGroups}
                toggleSelect={toggleSelect}
                toggleAll={toggleAll}
-               selectByTag={selectByTag}
+               toggleByTag={toggleByTag}
                isScanning={isScanning}
                triggerFetchMyGroups={triggerFetchMyGroups}
                stopScanning={() => fetch(`${API_BASE}/stop-scan`, { method: 'POST' })}

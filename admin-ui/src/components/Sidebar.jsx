@@ -4,7 +4,7 @@ import GroupCard from './GroupCard';
 
 const Sidebar = ({ 
   groups, discoveredGroups, activeTab, setActiveTab,
-  selectedGroups, toggleSelect, toggleAll, selectByTag,
+  selectedGroups, toggleSelect, toggleAll, toggleByTag,
   isScanning, triggerFetchMyGroups, stopScanning,
   isDiscovering, triggerDiscoverGroups, stopDiscovering,
   isHarvestingVisible, startVisibleHarvest, stopVisibleHarvest,
@@ -74,19 +74,21 @@ const Sidebar = ({
                 <div className="join w-full">
                   <input 
                     type="text" 
-                    placeholder="Nhập từ khóa (vD: rao vat)..." 
+                    placeholder="Từ khóa (vD: nha dat, bat dong san)..." 
                     className="input input-bordered input-sm join-item flex-1 bg-base-200"
-                    onKeyDown={(e) => { if (e.key === 'Enter') selectByTag(e.currentTarget.value); }}
+                    onKeyDown={(e) => { 
+                      if (e.key === 'Enter') toggleByTag(e.currentTarget.value); 
+                    }}
                     id="tag-input"
                   />
                   <button 
-                    className="btn btn-sm btn-primary join-item"
+                    className="btn btn-sm btn-primary join-item px-6"
                     onClick={() => {
                       const input = document.getElementById('tag-input');
-                      if (input) selectByTag(input.value);
+                      if (input) toggleByTag(input.value);
                     }}
                   >
-                    CHỌN
+                    CHỌN / BỎ
                   </button>
                 </div>
 
