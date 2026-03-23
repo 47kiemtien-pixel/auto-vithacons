@@ -62,11 +62,24 @@ function App() {
   };
 
 
+  const processGroup = (g) => {
+    if (!g) return g;
+    const lastPost = g.lastBotPostedAt || 0;
+    const diffHours = (Date.now() - lastPost) / (1000 * 60 * 60);
+    return {
+      ...g,
+      isSelectable: diffHours >= 48
+    };
+  };
+
   const fetchGroups = async () => {
     if (!selectedPageId) return;
     try {
       const res = await fetch(`${API_BASE}/groups?pageId=${selectedPageId}`);
-      if (res.ok) setGroups(await res.json());
+      if (res.ok) {
+        const rawGroups = await res.json();
+        setGroups(rawGroups.map(processGroup));
+      }
     } catch (error) { console.error('Fetch groups failed:', error); }
   };
 
@@ -128,22 +141,24 @@ function App() {
         if (data.type === 'group_found') {
           setGroups(prev => {
             const index = prev.findIndex(g => g.url === data.group.url);
+            const processed = processGroup(data.group);
             if (index !== -1) {
               const next = [...prev];
-              next[index] = data.group;
+              next[index] = processed;
               return next;
             }
-            return [...prev, data.group];
+            return [...prev, processed];
           });
         } else if (data.type === 'group_updated') {
           setGroups(prev => {
             const index = prev.findIndex(g => g.url === data.group.url);
             if (index === -1) return prev;
             const next = [...prev];
-            next[index] = { ...next[index], ...data.group };
+            next[index] = processGroup({ ...next[index], ...data.group });
             return next;
           });
-        } else if (data.type === 'group_discovered') {
+        }
+ else if (data.type === 'group_discovered') {
           setDiscoveredGroups(prev => prev.find(g => g.url === data.group.url) ? prev : [...prev, data.group]);
         }
         
