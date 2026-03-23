@@ -1,4 +1,4 @@
-﻿const { chromium } = require('playwright');
+const { chromium } = require('playwright');
 const path = require('path');
 const { sleep } = require('./scheduler');
 const fs = require('fs');
@@ -22,7 +22,7 @@ class FBAutomator {
         const coccocPath = coccocCandidates.find((candidate) => fs.existsSync(candidate));
 
         if (!coccocPath) {
-            throw new Error('Khong tim thay Coc Coc tren may.');
+            throw new Error('Không tìm thấy Cốc Cốc trên máy.');
         }
 
         return {
@@ -35,9 +35,9 @@ class FBAutomator {
     async init(externalContext) {
         if (externalContext) {
             this.context = externalContext;
-            this.log('[FB] Sá»­ dá»¥ng context trÃ¬nh duyá»‡t tá»« mÃ¡y chá»§...');
+            this.log('[FB] Sử dụng context trình duyệt từ máy chủ...');
         } else {
-            this.log('[FB] Khá»Ÿi táº¡o trÃ¬nh duyá»‡t Ä‘á»™c láº­p...');
+            this.log('[FB] Khởi tạo trình duyệt độc lập...');
             const launchConfig = this.getStandaloneLaunchConfig();
             this.context = await chromium.launchPersistentContext(launchConfig.userDataDir, {
                 executablePath: launchConfig.executablePath,
@@ -79,14 +79,14 @@ class FBAutomator {
     }
 
     async login() {
-        this.log('[FB] Kiá»ƒm tra Ä‘Äƒng nháº­p...');
+        this.log('[FB] Kiểm tra đăng nhập...');
         await this.page.goto('https://www.facebook.com', { waitUntil: 'domcontentloaded', timeout: 60000 });
         await this.page.waitForTimeout(3000);
 
         const loginState = await this.page.evaluate(() => {
             const cookieMatch = document.cookie.match(/c_user=(\d+)/);
             const bodyText = document.body?.innerText || '';
-            const hasLoginForm = Boolean(document.querySelector('input[name="email"], input[name="pass"]')) || /dang nhap|log in|login to facebook/i.test(bodyText);
+            const hasLoginForm = Boolean(document.querySelector('input[name="email"], input[name="pass"]')) || /đăng nhập|log in|login to facebook/i.test(bodyText);
             const hasProfileUi = Boolean(document.querySelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]'));
             return {
                 cookieUser: cookieMatch ? cookieMatch[1] : null,
@@ -96,20 +96,20 @@ class FBAutomator {
             };
         });
 
-        this.log(`[FB] Trang hien tai: ${loginState.currentUrl}`);
+        this.log(`[FB] Trang hiện tại: ${loginState.currentUrl}`);
 
         if (loginState.cookieUser && !loginState.hasLoginForm) {
-            this.log(`[FB] Da co phien dang nhap (c_user=${loginState.cookieUser}).`);
+            this.log(`[FB] Đã có phiên đăng nhập (c_user=${loginState.cookieUser}).`);
             return;
         }
 
         if (loginState.hasProfileUi) {
-            this.log('[FB] ÄÃ£ Ä‘Äƒng nháº­p tá»« phiÃªn trÆ°á»›c.');
+            this.log('[FB] Đã đăng nhập từ phiên trước.');
             return;
         }
 
         if (!loginState.hasLoginForm) {
-            this.log('[FB] Khong thay form dang nhap, thu cho them de xac nhan phien...');
+            this.log('[FB] Không thấy form đăng nhập, thử chờ thêm để xác nhận phiên...');
             const recovered = await this.page.waitForFunction(() => {
                 const cookieMatch = document.cookie.match(/c_user=(\d+)/);
                 const hasProfileUi = Boolean(document.querySelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]'));
@@ -118,14 +118,13 @@ class FBAutomator {
             }, { timeout: 15000 }).then(() => true).catch(() => false);
 
             if (recovered) {
-                this.log('[FB] Da xac nhan phien dang nhap sau khi cho them.');
+                this.log('[FB] Đã xác nhận phiên đăng nhập sau khi chờ thêm.');
                 return;
             }
         }
 
         if (!loginState.cookieUser || loginState.hasLoginForm) {
-            this.log('[FB] CHÆ¯A ÄÄ‚NG NHáº¬P. Vui lÃ²ng Ä‘Äƒng nháº­p Facebook ngay trÃªn cá»­a sá»• trÃ¬nh duyá»‡t Cá»‘c Cá»‘c vá»«a hiá»‡n ra...');
-            // Äá»£i ngÆ°á»i dÃ¹ng Ä‘Äƒng nháº­p thá»§ cÃ´ng (tá»‘i Ä‘a 10 phÃºt)
+            this.log('[FB] CHƯA ĐĂNG NHẬP. Vui lòng đăng nhập Facebook ngay trên cửa sổ trình duyệt Cốc Cốc vừa hiện ra...');
             try {
                 await this.page.waitForFunction(() => {
                     const cookieMatch = document.cookie.match(/c_user=(\d+)/);
@@ -133,9 +132,9 @@ class FBAutomator {
                     const hasProfileUi = Boolean(document.querySelector('[aria-label="Your profile"], [aria-label="Trang cá nhân của bạn"]'));
                     return (cookieMatch && !hasLoginForm) || hasProfileUi;
                 }, { timeout: 600000 });
-                this.log('[FB] ÄÄƒng nháº­p thÃ nh cÃ´ng!');
+                this.log('[FB] Đăng nhập thành công!');
             } catch (e) {
-                this.log('[FB] QuÃ¡ thá»i gian chá» Ä‘Äƒng nháº­p (10 phÃºt).');
+                this.log('[FB] Quá thời gian chờ đăng nhập (10 phút).');
                 throw new Error('Timeout waiting for login');
             }
         }
@@ -158,8 +157,8 @@ class FBAutomator {
                 const normalize = (value) => (value || '')
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\u0111/g, 'd')
-                    .replace(/\u0110/g, 'D')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'D')
                     .toLowerCase();
 
                 const pageText = normalize(document.body.innerText || '');
@@ -236,12 +235,12 @@ class FBAutomator {
             }
 
         } catch (e) {
-            this.log(`[FB] Khong doc duoc actor hien hanh: ${e.message}`);
+            this.log(`[FB] Không đọc được actor hiện hành: ${e.message}`);
         }
 
         const preferredActor = this.getPreferredActorOverride();
         if (preferredActor) {
-            this.log(`[FB] Dung preferred actor override: ${preferredActor}`);
+            this.log(`[FB] Dùng preferred actor override: ${preferredActor}`);
             return preferredActor;
         }
 
@@ -288,8 +287,8 @@ class FBAutomator {
                 const normalize = (value) => (value || '')
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\u0111/g, 'd')
-                    .replace(/\u0110/g, 'D')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'D')
                     .replace(/\s+/g, ' ')
                     .trim()
                     .toLowerCase();
@@ -339,7 +338,7 @@ class FBAutomator {
                     const profileMatch = href.match(/profile\.php\?(?:[^#]*?&)?id=(\d+)/i);
                     if (profileMatch) return profileMatch[1];
 
-                    const slugMatch = href.match(/^https:\/\/www\.facebook\.com\/([^\/?#]+)(?:\/|$)/i);
+                    const slugMatch = href.match(/^https:\/\/www\.facebook\.com\/([^\/\?#]+)(?:\/|$)/i);
                     if (!slugMatch) return null;
                     const slug = slugMatch[1];
                     if ([
@@ -493,8 +492,8 @@ class FBAutomator {
                 const normalize = (value) => (value || '')
                     .normalize('NFD')
                     .replace(/[\u0300-\u036f]/g, '')
-                    .replace(/\u0111/g, 'd')
-                    .replace(/\u0110/g, 'D')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'D')
                     .replace(/\s+/g, ' ')
                     .trim()
                     .toLowerCase();
@@ -532,13 +531,13 @@ class FBAutomator {
 
             return actor || null;
         } catch (error) {
-            this.log(`[FB] Khong doc duoc actor trong nhom: ${error.message}`);
+            this.log(`[FB] Không đọc được actor trong nhóm: ${error.message}`);
             return null;
         }
     }
     async postToGroup(groupUrl, content, imagePaths = []) {
         try {
-            console.log(`[FB] Äang truy cáº­p nhÃ³m: ${groupUrl}`);
+            this.log(`[FB] Đang truy cập nhóm: ${groupUrl}`);
             await this.page.goto(groupUrl);
             await sleep(1500);
 
@@ -584,8 +583,8 @@ class FBAutomator {
                     const normalize = (value) => (value || '')
                         .normalize('NFD')
                         .replace(/[\u0300-\u036f]/g, '')
-                        .replace(/\u0111/g, 'd')
-                        .replace(/\u0110/g, 'D')
+                        .replace(/đ/g, 'd')
+                        .replace(/Đ/g, 'D')
                         .toLowerCase()
                         .replace(/\s+/g, ' ')
                         .trim();
@@ -618,9 +617,9 @@ class FBAutomator {
 
             await sleep(1200);
 
-            // Tai anh len neu co
+            // Tải ảnh lên nếu có
             if (imagePaths.length > 0) {
-                this.log(`[FB] Dang tai len ${imagePaths.length} anh...`);
+                this.log(`[FB] Đang tải lên ${imagePaths.length} ảnh...`);
 
                 const dialog = this.page.locator('div[role="dialog"]').last();
                 let uploadConfirmed = false;
@@ -650,12 +649,12 @@ class FBAutomator {
                 const tryAttachViaInputAncestorClick = async () => {
                     const metas = await getUploadInputMetas();
                     const dialogMetas = metas.filter((meta) => meta.inDialog);
-                    this.log(`[FB] Co ${dialogMetas.length} input file hop le trong dialog de thu click ancestor.`);
+                    this.log(`[FB] Có ${dialogMetas.length} input file hợp lệ trong dialog để thử click ancestor.`);
 
                     for (const meta of dialogMetas) {
                         try {
                             const input = this.page.locator('input[type="file"]').nth(meta.index);
-                            this.log(`[FB] Thu kich filechooser truc tiep tu input #${meta.index + 1}.`);
+                            this.log(`[FB] Thử kích filechooser trực tiếp từ input #${meta.index + 1}.`);
 
                             await input.evaluate((el) => {
                                 el.style.display = 'block';
@@ -677,7 +676,7 @@ class FBAutomator {
                             if (directChooser) {
                                 await directChooser.setFiles(imagePaths);
                                 attachedByInput = true;
-                                this.log(`[FB] Da nap anh qua filechooser truc tiep tu input #${meta.index + 1}.`);
+                                this.log(`[FB] Đã nạp ảnh qua filechooser trực tiếp từ input #${meta.index + 1}.`);
                                 return true;
                             }
 
@@ -702,27 +701,27 @@ class FBAutomator {
 
                             const clickableElement = clickableHandle.asElement();
                             if (!clickableElement) {
-                                this.log(`[FB] Khong tim thay ancestor clickable cho input #${meta.index + 1}.`);
+                                this.log(`[FB] Không tìm thấy ancestor clickable cho input #${meta.index + 1}.`);
                                 continue;
                             }
 
-                            this.log(`[FB] Thu click ancestor cua input #${meta.index + 1} de mo upload that.`);
+                            this.log(`[FB] Thử click ancestor của input #${meta.index + 1} để mở upload thật.`);
                             const [fileChooser] = await Promise.all([
                                 this.page.waitForEvent('filechooser', { timeout: 2500 }).catch(() => null),
                                 clickableElement.click({ timeout: 2500 }).catch(() => null)
                             ]);
 
                             if (!fileChooser) {
-                                this.log(`[FB] Ancestor cua input #${meta.index + 1} khong mo ra filechooser.`);
+                                this.log(`[FB] Ancestor của input #${meta.index + 1} không mở ra filechooser.`);
                                 continue;
                             }
 
                             await fileChooser.setFiles(imagePaths);
                             attachedByInput = true;
-                            this.log(`[FB] Da nap anh qua filechooser tu ancestor input #${meta.index + 1}.`);
+                            this.log(`[FB] Đã nạp ảnh qua filechooser từ ancestor input #${meta.index + 1}.`);
                             return true;
                         } catch (e) {
-                            this.log(`[FB] Click ancestor cua input that bai: ${e.message}`);
+                            this.log(`[FB] Click ancestor của input thất bại: ${e.message}`);
                         }
                     }
 
@@ -732,7 +731,7 @@ class FBAutomator {
                 const tryAttachToVisibleInputs = async (scopeLabel) => {
                     const fileInputs = this.page.locator('input[type="file"]');
                     const inputCount = await fileInputs.count();
-                    this.log(`[FB] Tim thay ${inputCount} input file o scope ${scopeLabel}.`);
+                    this.log(`[FB] Tìm thấy ${inputCount} input file ở scope ${scopeLabel}.`);
 
                     let triedCount = 0;
 
@@ -750,16 +749,16 @@ class FBAutomator {
                             if (!meta) continue;
                             if (scopeLabel === 'dialog' && !meta.inDialog) continue;
                             if (meta.disabled) {
-                                this.log(`[FB] Bo qua input file #${i + 1} vi dang bi disabled.`);
+                                this.log(`[FB] Bỏ qua input file #${i + 1} vì đang bị disabled.`);
                                 continue;
                             }
                             if (meta.accept && !/image|png|jpg|jpeg|webp/i.test(meta.accept)) {
-                                this.log(`[FB] Bo qua input file #${i + 1} vi accept khong phai anh: ${meta.accept}`);
+                                this.log(`[FB] Bỏ qua input file #${i + 1} vì accept không phải ảnh: ${meta.accept}`);
                                 continue;
                             }
 
                             triedCount++;
-                            this.log(`[FB] Thu input file #${i + 1} | inDialog=${meta.inDialog} | multiple=${meta.multiple} | hidden=${meta.hiddenByStyle} | accept=${meta.accept || 'n/a'}`);
+                            this.log(`[FB] Thử input file #${i + 1} | inDialog=${meta.inDialog} | multiple=${meta.multiple} | hidden=${meta.hiddenByStyle} | accept=${meta.accept || 'n/a'}`);
 
                             await input.setInputFiles(meta.multiple ? imagePaths : [imagePaths[0]], { timeout: 5000 });
                             await input.evaluate((el) => {
@@ -771,17 +770,17 @@ class FBAutomator {
                             const filesLength = await input.evaluate((el) => el.files?.length || 0).catch(() => 0);
                             if (filesLength > 0) {
                                 attachedByInput = true;
-                                this.log(`[FB] Input file #${i + 1} da nhan ${filesLength} tep | inDialog=${meta.inDialog} | accept=${meta.accept || 'n/a'}`);
+                                this.log(`[FB] Input file #${i + 1} đã nhận ${filesLength} tệp | inDialog=${meta.inDialog} | accept=${meta.accept || 'n/a'}`);
                                 return true;
                             }
 
-                            this.log(`[FB] Input file #${i + 1} khong giu tep sau setInputFiles.`);
+                            this.log(`[FB] Input file #${i + 1} không giữ tệp sau setInputFiles.`);
                         } catch (e) {
-                            this.log(`[FB] Input file #${i + 1} khong dung duoc: ${e.message}`);
+                            this.log(`[FB] Input file #${i + 1} không dùng được: ${e.message}`);
                         }
 
                         if (scopeLabel === 'page' && triedCount >= 1) {
-                            this.log('[FB] Da thu 1 input file ngoai dialog, dung fallback de tranh cham.');
+                            this.log('[FB] Đã thử 1 input file ngoài dialog, dừng fallback để tránh chậm.');
                             break;
                         }
                     }
@@ -804,10 +803,10 @@ class FBAutomator {
                     if (await directButton.count()) {
                         try {
                             await directButton.click({ timeout: 3000 });
-                            this.log('[FB] Da bam nut mo chon anh/video trong dialog.');
+                            this.log('[FB] Đã bấm nút mở chọn ảnh/video trong dialog.');
                             return true;
                         } catch (e) {
-                            this.log(`[FB] Bam nut anh/video that bai: ${e.message}`);
+                            this.log(`[FB] Bấm nút ảnh/video thất bại: ${e.message}`);
                         }
                     }
 
@@ -820,8 +819,8 @@ class FBAutomator {
                                 const normalize = (value) => (value || '')
                                     .normalize('NFD')
                                     .replace(/[\u0300-\u036f]/g, '')
-                                    .replace(/\u0111/g, 'd')
-                                    .replace(/\u0110/g, 'D')
+                                    .replace(/đ/g, 'd')
+                                    .replace(/Đ/g, 'D')
                                     .replace(/\s+/g, ' ')
                                     .trim()
                                     .toLowerCase();
@@ -845,10 +844,10 @@ class FBAutomator {
                             if (!clickableElement) continue;
 
                             await clickableElement.click({ timeout: 3000 });
-                            this.log(`[FB] Da bam nut anh/video bang Playwright text scan: ${meta.text}`);
+                            this.log(`[FB] Đã bấm nút ảnh/video bằng Playwright text scan: ${meta.text}`);
                             return true;
                         } catch (e) {
-                            this.log(`[FB] Thu bam nut anh/video bang text scan that bai: ${e.message}`);
+                            this.log(`[FB] Thử bấm nút ảnh/video bằng text scan thất bại: ${e.message}`);
                         }
                     }
 
@@ -864,14 +863,14 @@ class FBAutomator {
                     if (fileChooser) {
                         await fileChooser.setFiles(imagePaths);
                         attachedByInput = true;
-                        this.log('[FB] Da nap anh qua su kien filechooser.');
+                        this.log('[FB] Đã nạp ảnh qua sự kiện filechooser.');
                     } else {
-                        this.log('[FB] Khong co filechooser, se thu input file sau khi bam nut anh/video.');
+                        this.log('[FB] Không có filechooser, sẽ thử input file sau khi bấm nút ảnh/video.');
                     }
                     await sleep(700);
                 } else {
                     if (!openedRealUploadFlow) {
-                        this.log('[FB] Khong bam duoc nut anh/video, se fallback sang input file truc tiep.');
+                        this.log('[FB] Không bấm được nút ảnh/video, sẽ fallback sang input file trực tiếp.');
                     }
                 }
 
@@ -901,11 +900,11 @@ class FBAutomator {
                     const hasAttachmentPreview = selectors.some((selector) => dialog.querySelector(selector));
                     return hasAttachedFile || hasAttachmentPreview;
                 }, { timeout: 6000 }).then(() => true).catch(() => false);
-                this.log(`[FB] Ket qua xac nhan upload anh: ${uploadConfirmed ? 'OK' : 'KHONG THAY ATTACHMENT'} | attachedByInput=${attachedByInput}`);
+                this.log(`[FB] Kết quả xác nhận upload ảnh: ${uploadConfirmed ? 'OK' : 'KHÔNG THẤY ATTACHMENT'} | attachedByInput=${attachedByInput}`);
                 await sleep(700);
 
                 if (!uploadConfirmed) {
-                    this.log('[FB] Upload anh chua thanh cong trong composer. Dung dang bai de tranh bai khong kem hinh.');
+                    this.log('[FB] Upload ảnh chưa thành công trong composer. Dừng đăng bài để tránh bài không kèm hình.');
                     return { success: false, pending: false, reason: 'image_upload_failed' };
                 }
             }
@@ -917,7 +916,7 @@ class FBAutomator {
             let typed = false;
             for(let tb of textboxes) {
                 if(await tb.isVisible()) {
-                    this.log('[FB] Tim thay o nhap chu trong dialog, tien hanh go noi dung...');
+                    this.log('[FB] Tìm thấy ô nhập chữ trong dialog, tiến hành gõ nội dung...');
                     await tb.click();
                     await sleep(250);
                     await this.page.keyboard.insertText(content);
@@ -927,30 +926,27 @@ class FBAutomator {
             }
             
             if(!typed) {
-                this.log('[FB] Van khong nhap duoc van ban bang click. Thu fallback...');
-                const fallbackInput = await this.page.$('div[aria-label="Báº¡n viáº¿t gÃ¬ Ä‘i..."][contenteditable="true"]');
+                this.log('[FB] Vẫn không nhập được văn bản bằng click. Thử fallback...');
+                const fallbackInput = await this.page.$('div[aria-label="Bạn viết gì đi..."][contenteditable="true"]');
                 if (fallbackInput) {
                     await fallbackInput.fill(content);
                     typed = true;
                 }
                 if (!typed) {
-                    this.log('[FB] Khong nhap duoc noi dung vao o soan bai.');
+                    this.log('[FB] Không nhập được nội dung vào ô soạn bài.');
                     return { success: false, pending: false, reason: 'textbox_not_found' };
                 }
             }
             
             await sleep(500);
-            this.log('[FB] Dang nhan nut Dang...');
+            this.log('[FB] Đang nhấn nút Đăng...');
             
             const submitButtonSelectors = [
                 'div[role="dialog"] [aria-label="Đăng"]',
                 'div[role="dialog"] [aria-label="Dang"]',
-                'div[aria-label="ÄÄƒng"]',
                 'div[aria-label="Post"]',
-                'div[aria-label="ÄÄƒng bÃ i"]',
                 'div[role="dialog"] [role="button"]:has-text("Đăng")',
                 'div[role="dialog"] [role="button"]:has-text("Dang")',
-                'div[role="button"]:has-text("ÄÄƒng")',
                 'div[role="button"]:has-text("Post")'
             ];
 
@@ -960,11 +956,10 @@ class FBAutomator {
                     const elements = await this.page.$$(selector);
                     for (let el of elements) {
                         if (await el.isVisible()) {
-                            // Kiá»ƒm tra xem nÃºt cÃ³ bá»‹ disabled khÃ´ng do Ä‘ang táº£i áº£nh
                             let isDisabled = await el.getAttribute('aria-disabled');
                             let waitCount = 0;
                             while (isDisabled === 'true' && waitCount < 30) {
-                                this.log(`[FB] Nut Dang dang bi vo hieu hoa, doi them... (${waitCount * 2}s)`);
+                                this.log(`[FB] Nút Đăng đang bị vô hiệu hóa, đợi thêm... (${waitCount * 2}s)`);
                                 await sleep(1000);
                                 isDisabled = await el.getAttribute('aria-disabled');
                                 waitCount++;
@@ -974,7 +969,7 @@ class FBAutomator {
                                 submitButton = el;
                                 break;
                             } else {
-                                this.log('[FB] Qua thoi gian cho tai anh, nut Dang van bi khoa.');
+                                this.log('[FB] Quá thời gian chờ tải ảnh, nút Đăng vẫn bị khóa.');
                             }
                         }
                     }
@@ -996,8 +991,8 @@ class FBAutomator {
                             const normalize = (value) => (value || '')
                                 .normalize('NFD')
                                 .replace(/[\u0300-\u036f]/g, '')
-                                .replace(/\u0111/g, 'd')
-                                .replace(/\u0110/g, 'D')
+                                .replace(/đ/g, 'd')
+                                .replace(/Đ/g, 'D')
                                 .replace(/\s+/g, ' ')
                                 .trim()
                                 .toLowerCase();
@@ -1019,102 +1014,100 @@ class FBAutomator {
                         }).catch(() => null);
 
                         if (!meta?.matched) continue;
-                        this.log(`[FB] Tim thay ung vien nut Dang: text=${meta.text || 'n/a'} | aria=${meta.aria || 'n/a'} | disabled=${meta.disabled}`);
+                        this.log(`[FB] Tìm thấy ứng viên nút Đăng: text=${meta.text || 'n/a'} | aria=${meta.aria || 'n/a'} | disabled=${meta.disabled}`);
 
                         if (!meta.disabled) {
                             submitButton = candidate;
                             break;
                         }
                     } catch (e) {
-                        this.log(`[FB] Doc ung vien nut Dang that bai: ${e.message}`);
+                        this.log(`[FB] Đọc ứng viên nút Đăng thất bại: ${e.message}`);
                     }
                 }
             }
 
             if (submitButton) {
                 await submitButton.click();
-                this.log('[FB] Da nhan nut Dang, dang cho Facebook xu ly...');
+                this.log('[FB] Đã nhấn nút Đăng, đang chờ Facebook xử lý...');
                 
                 let postStatus = 'success';
                 try {
                     await this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 30000 });
-                    this.log('[FB] Hop thoai dang bai da dong.');
+                    this.log('[FB] Hộp thoại đăng bài đã đóng.');
                 } catch(e) {
                      const pageText = await this.page.innerText('body');
-                     if (pageText.includes('tá»± Ä‘á»™ng tá»« chá»‘i bÃ i viáº¿t') || pageText.includes('khÃ´ng Ä‘Ã¡p á»©ng tiÃªu chÃ­') || pageText.includes('LiÃªn káº¿t trong bÃ i viáº¿t')) {
-                         this.log('[FB] Phat hien bai viet bi tu choi tu dong.');
-                         if (pageText.includes('liÃªn káº¿t') || pageText.includes('link') || pageText.includes('Link')) {
+                     if (pageText.includes('tự động từ chối bài viết') || pageText.includes('không đáp ứng tiêu chí') || pageText.includes('Liên kết trong bài viết')) {
+                         this.log('[FB] Phát hiện bài viết bị từ chối tự động.');
+                         if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
                              postStatus = 'rejected_link';
-                             this.log('[FB] Ly do: nhom nay cam chen link.');
+                             this.log('[FB] Lý do: nhóm này cấm chèn link.');
                          } else {
                              postStatus = 'rejected_other';
                          }
                          
                          try {
-                             const closeX = await this.page.$('div[aria-label="ÄÃ³ng"], div[aria-label="Close"]');
+                             const closeX = await this.page.$('div[aria-label="Đóng"], div[aria-label="Close"]');
                              if (closeX) await closeX.click();
                          } catch(e2) {}
                      } else {
-                         this.log('[FB] Hop thoai chua dong sau 30s va khong thay popup tu choi ro rang.');
+                         this.log('[FB] Hộp thoại chưa đóng sau 30s và không thấy popup từ chối rõ ràng.');
                      }
                 }
                 
                 if (postStatus === 'rejected_link') return { success: false, pending: false, reason: 'rejected_link' };
                 if (postStatus === 'rejected_other') return { success: false, pending: false, reason: 'rejected_other' };
 
-                this.log('[FB] Cho Facebook on dinh sau khi dong composer...');
+                this.log('[FB] Chờ Facebook ổn định sau khi đóng composer...');
                 await this.page.waitForLoadState('networkidle', { timeout: 15000 }).catch(() => {});
                 await sleep(6000);
                 
                 let isPending = false;
                 try {
                     const pageText = await this.page.innerText('body');
-                    if (pageText.includes('Ä‘ang chá» phÃª duyá»‡t') || pageText.includes('Äang chá» quáº£n trá»‹ viÃªn')) {
+                    if (pageText.includes('đang chờ phê duyệt') || pageText.includes('Đang chờ quản trị viên')) {
                         isPending = true;
-                        this.log('[FB] Da thay thong bao bai dang dang cho duyet.');
+                        this.log('[FB] Đã thấy thông báo bài đăng đang chờ duyệt.');
                     }
                 } catch(e) {}
 
                 return { success: true, pending: isPending };
             } else {
-                this.log('[FB] Khong tim thay nut Dang hoac nut bi vo hieu hoa vinh vien.');
+                this.log('[FB] Không tìm thấy nút Đăng hoặc nút bị vô hiệu hóa vĩnh viễn.');
                 return { success: false, pending: false, reason: 'submit_button_not_found' };
             }
 
         } catch (error) {
-            this.log(`[FB] Loi khi dang bai len ${groupUrl}: ${error.message}`);
+            this.log(`[FB] Lỗi khi đăng bài lên ${groupUrl}: ${error.message}`);
             return { success: false, pending: false, reason: error?.message || 'post_exception' };
         }
     }
 
-    // HÃ m verify báº±ng cÃ¡ch truy cáº­p tháº³ng link nhÃ³m / user
     async verifyPost(groupUrl, userId, content) {
         try {
             const resolvedUserId = userId || await this.getActorFromGroupContext(groupUrl) || await this.getCurrentUserId();
-            // Táº¡o link chuáº©n: https://www.facebook.com/groups/id_nhom/user/id_user/
             const checkUrl = `${groupUrl.replace(/\/$/, '')}/user/${resolvedUserId}/`;
-            console.log(`[FB] Äang kiá»ƒm tra tráº¡ng thÃ¡i bÃ i Ä‘Äƒng táº¡i: ${checkUrl}`);
+            console.log(`[FB] Đang kiểm tra trạng thái bài đăng tại: ${checkUrl}`);
             await this.page.goto(checkUrl);
-            await sleep(8000); // Äá»£i trang load cÃ¡c bÃ i post
+            await sleep(8000); 
             
             const pageText = await this.page.innerText('body') || '';
-            const shortContent = content.substring(0, 40).trim(); // Láº¥y 40 kÃ½ tá»± Ä‘áº§u lÃ m tá»« khÃ³a tÃ¬m kiáº¿m
+            const shortContent = content.substring(0, 40).trim();
             
-            if (pageText.includes('Ä‘ang chá» phÃª duyá»‡t') || pageText.includes('Äang chá» quáº£n trá»‹ viÃªn') || pageText.includes('BÃ i viáº¿t Ä‘ang chá» xá»­ lÃ½')) {
-                 console.log('==> [Káº¾T QUáº¢]: BÃ i Ä‘Äƒng thÃ nh cÃ´ng nhÆ°ng ÄANG CHá»œ QUáº¢N TRá»Š VIÃŠN PHÃŠ DUYá»†T.');
+            if (pageText.includes('đang chờ phê duyệt') || pageText.includes('Đang chờ quản trị viên') || pageText.includes('Bài viết đang chờ xử lý')) {
+                 console.log('==> [KẾT QUẢ]: Bài đăng thành công nhưng ĐANG CHỜ QUẢN TRỊ VIÊN PHÊ DUYỆT.');
                  return 'pending';
             }
             
             if (pageText.includes(shortContent)) {
-                 console.log('==> [Káº¾T QUáº¢]: BÃ i Ä‘Äƒng ÄÃƒ ÄÆ¯á»¢C XUáº¤T Báº¢N THÃ€NH CÃ”NG trÃªn nhÃ³m!');
+                 console.log('==> [KẾT QUẢ]: Bài đăng ĐÃ ĐƯỢC XUẤT BẢN THÀNH CÔNG trên nhóm!');
                  return 'published';
             }
             
-            console.log('==> [Káº¾T QUáº¢]: KhÃ´ng tÃ¬m tháº¥y bÃ i Ä‘Äƒng táº¡i link cÃ¡ nhÃ¢n. CÃ³ thá»ƒ bÃ i Ä‘Ã£ bá»‹ gá»¡ hoáº·c chÆ°a hiá»ƒn thá»‹.');
+            console.log('==> [KẾT QUẢ]: Không tìm thấy bài đăng tại link cá nhân. Có thể bài đã bị gỡ hoặc chưa hiển thị.');
             return 'not_found';
             
         } catch (error) {
-            console.error('[FB] Lá»—i khi kiá»ƒm tra bÃ i Ä‘Äƒng:', error);
+            console.error('[FB] Lỗi khi kiểm tra bài đăng:', error);
             return 'error';
         }
     }
@@ -1122,7 +1115,7 @@ class FBAutomator {
     async checkRemovedContent(groupUrl) {
         try {
             const removedUrl = `${groupUrl.replace(/\/$/, '')}/my_removed_content/`;
-            this.log(`[FB] Dang kiem tra noi dung bi go tai: ${removedUrl}`);
+            this.log(`[FB] Đang kiểm tra nội dung bị gỡ tại: ${removedUrl}`);
             await this.page.goto(removedUrl, { waitUntil: 'networkidle' }).catch(() => {});
             await sleep(2500);
             
@@ -1151,10 +1144,10 @@ class FBAutomator {
 
             this.log(`[FB] Removed content page meta: url=${removedMeta.currentUrl} | articleCount=${removedMeta.articleCount} | feedArticleCount=${removedMeta.feedArticleCount} | hasEmptyState=${removedMeta.hasEmptyState}`);
             
-            if (pageText.includes('KhÃ´ng cÃ³ bÃ i viáº¿t nÃ o Ä‘á»ƒ hiá»ƒn thá»‹') || 
+            if (pageText.includes('Không có bài viết nào để hiển thị') || 
                 pageText.includes('No posts to show') ||
                 pageText.includes('No content found')) {
-                this.log('[FB] Xac nhan: trang my_removed_content dang trong.');
+                this.log('[FB] Xác nhận: trang my_removed_content đang trống.');
                 return 'clean';
             }
 
@@ -1163,18 +1156,18 @@ class FBAutomator {
                 !removedMeta.hasEmptyState &&
                 (removedMeta.articleCount > 0 || removedMeta.feedArticleCount > 0)
             ) {
-                this.log('[FB] Phat hien bai xuat hien trong my_removed_content. Xem nhu da bi go.');
-                if (pageText.toLowerCase().includes('liÃªn káº¿t') || pageText.toLowerCase().includes('link')) {
+                this.log('[FB] Phát hiện bài xuất hiện trong my_removed_content. Xem như đã bị gỡ.');
+                if (pageText.toLowerCase().includes('liên kết') || pageText.toLowerCase().includes('link')) {
                     return 'removed_by_link';
                 }
                 return 'removed_other';
             }
 
             const warningKeywords = [
-                'Nhiá»u ngÆ°á»i bÃ¡o cÃ¡o', 'vi pháº¡m tiÃªu chuáº©n cá»™ng Ä‘á»“ng',
-                'Tá»± Ä‘á»™ng gá»¡', 'Auto-removed', 'Ä‘Ã£ bá»‹ gá»¡', 'Ná»™i dung bá»‹ gá»¡',
-                'Removed content', 'Gá»¡ bá»Ÿi', 'declined', 'denied', 'tá»« chá»‘i',
-                'Tá»« khÃ³a', 'tiÃªu chÃ­', 'Ä‘Ã¡p á»©ng'
+                'Nhiều người báo cáo', 'vi phạm tiêu chuẩn cộng đồng',
+                'Tự động gỡ', 'Auto-removed', 'đã bị gỡ', 'Nội dung bị gỡ',
+                'Removed content', 'Gỡ bởi', 'declined', 'denied', 'từ chối',
+                'Từ khóa', 'tiêu chí', 'đáp ứng'
             ];
 
             let isRemoved = false;
@@ -1187,17 +1180,15 @@ class FBAutomator {
                 }
             }
 
-            // RiÃªng tá»« khÃ³a "Link" hoáº·c "LiÃªn káº¿t" pháº£i Ä‘i kÃ¨m vá»›i dáº¥u hiá»‡u bá»‹ gá»¡ Ä‘á»ƒ trÃ¡nh nháº­n nháº§m menu
             if (!isRemoved) {
-                const linkKeywords = ['liÃªn káº¿t', 'link'];
-                const removalIndicators = ['gá»¡', 'vi pháº¡m', 'removed', 'declined', 'not approved'];
+                const linkKeywords = ['liên kết', 'link'];
+                const removalIndicators = ['gỡ', 'vi phạm', 'removed', 'declined', 'not approved'];
                 
                 for (const lkw of linkKeywords) {
                     if (pageText.toLowerCase().includes(lkw)) {
-                        // Kiá»ƒm tra xem cÃ³ tá»« "gá»¡" hoáº·c "vi pháº¡m" á»Ÿ gáº§n Ä‘Ã³ khÃ´ng (trong cÃ¹ng trang vÄƒn báº£n)
                         for (const ind of removalIndicators) {
                             if (pageText.toLowerCase().includes(ind)) {
-                                console.log(`[FB] PhÃ¡t hiá»‡n cáº·p tá»« khÃ³a nghi ngá»: "${lkw}" + "${ind}"`);
+                                console.log(`[FB] Phát hiện cặp từ khóa nghi ngờ: "${lkw}" + "${ind}"`);
                                 matchedKw = `${lkw} + ${ind}`;
                                 isRemoved = true;
                                 break;
@@ -1209,17 +1200,17 @@ class FBAutomator {
             }
 
             if (isRemoved) {
-                this.log(`==> [CANH BAO]: Phat hien bai viet bi go. Ly do nghi ngo: ${matchedKw}`);
-                if (pageText.toLowerCase().includes('liÃªn káº¿t') || pageText.toLowerCase().includes('link')) {
+                this.log(`==> [CANH BÁO]: Phát hiện bài viết bị gỡ. Lý do nghi ngờ: ${matchedKw}`);
+                if (pageText.toLowerCase().includes('liên kết') || pageText.toLowerCase().includes('link')) {
                     return 'removed_by_link';
                 }
                 return 'removed_other';
             }
             
-            this.log('[FB] Khong thay dau hieu bai viet bi go tren my_removed_content.');
+            this.log('[FB] Không thấy dấu hiệu bài viết bị gỡ trên my_removed_content.');
             return 'clean';
         } catch (error) {
-            this.log(`[FB] Loi khi kiem tra removed content: ${error.message}`);
+            this.log(`[FB] Lỗi khi kiểm tra removed content: ${error.message}`);
             return 'error';
         }
     }

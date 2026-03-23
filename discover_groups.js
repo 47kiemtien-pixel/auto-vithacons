@@ -4,16 +4,14 @@ const fs = require('fs');
 async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
     const page = await context.newPage();
     try {
-        // Sử dụng ngoặc kép để Facebook tìm chính xác cụm từ (Exact Match)
         const exactKeyword = `"${keyword}"`;
         const url = `https://www.facebook.com/search/groups/?q=${encodeURIComponent(exactKeyword)}`;
-        logCallback(`[Discovery] Bắt đầu điều hướng tới (Tìm chính xác): ${url}`);
+        logCallback(`[Discovery] Bắt đầu điều hướng tới (Tìm mẫu): ${url}`);
         
         await page.goto(url, { waitUntil: 'load', timeout: 90000 });
         logCallback('[Discovery] Đã tải xong trang tìm kiếm. Đợi dữ liệu render...');
         await page.waitForTimeout(7000);
 
-        // Cuộn trang để tải thêm kết quả
         logCallback('[Discovery] Đang cuộn trang (3 lần) để lấy thêm nhóm...');
         for (let i = 0; i < 3; i++) {
             await page.evaluate(() => window.scrollBy(0, 1500));
@@ -23,8 +21,6 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
         logCallback('[Discovery] Đang trích xuất dữ liệu nhóm từ DOM...');
         const groups = await page.evaluate((kw) => {
             const results = [];
-            // FB Search Groups thường nằm trong các div có role="article" hoặc cấu trúc lồng nhau phức tạp
-            // Chúng ta tìm tất cả các block có chứa link group
             const allLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
             const processedUrls = new Set();
             const lowerKw = kw.toLowerCase();
@@ -32,11 +28,8 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
             allLinks.forEach(link => {
                 let fullUrl = link.href.split('?')[0];
                 if (!fullUrl.endsWith('/')) fullUrl += '/';
-                
-                // Bỏ qua link không phải group info (search, profile, etc.)
                 if (fullUrl.includes('/search/') || processedUrls.has(fullUrl)) return;
 
-                // Tìm container cha chứa cả tên và nút
                 let container = link.closest('div[role="article"]') || 
                                 link.closest('div[role="listitem"]') ||
                                 link.parentElement?.closest('div.x1yzt60o'); 
@@ -44,37 +37,26 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                 if (container) {
                     const text = container.innerText || '';
                     const lines = text.split('\n').filter(l => l.trim());
-                    
                     if (lines.length >= 1) {
                         const name = lines[0];
-                        
-                        // LỌC NGHIÊM NGẶT: Tên phải chứa đúng cụm từ người dùng nhập
-                        if (!name.toLowerCase().includes(lowerKw)) {
-                            return; 
-                        }
+                        if (!name.toLowerCase().includes(lowerKw)) return; 
                         const info = lines.find(l => l.includes('thành viên') || l.includes('members')) || '';
                         
-                        // Tìm nút Tham gia
                         let joinBtnFound = false;
                         const buttons = container.querySelectorAll('div[role="button"], [role="button"]');
                         for (const btn of buttons) {
                             const ariaLabel = (btn.getAttribute('aria-label') || '').toLowerCase();
                             const btnText = (btn.innerText || '').trim().toLowerCase();
-                            
-                            if (ariaLabel.includes('tham gia nhóm') || 
-                                ariaLabel.includes('join group') || 
-                                btnText === 'tham gia' || 
-                                btnText === 'join') {
+                            if (ariaLabel.includes('tham gia nhóm') || ariaLabel.includes('join group') || 
+                                btnText === 'tham gia' || btnText === 'join') {
                                 joinBtnFound = true;
                                 break;
                             }
                         }
                         
                         const textLower = text.toLowerCase();
-                        const isJoined = textLower.includes('đã tham gia') || 
-                                         textLower.includes('joined') || 
-                                         textLower.includes('đã gửi yêu cầu') || 
-                                         textLower.includes('requested') || 
+                        const isJoined = textLower.includes('đã tham gia') || textLower.includes('joined') || 
+                                         textLower.includes('đã gửi yêu cầu') || textLower.includes('requested') || 
                                          textLower.includes('đang chờ');
 
                         processedUrls.add(fullUrl);
@@ -92,12 +74,9 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
         }, keyword);
 
         logCallback(`[Discovery] Phân tích xong. Tìm thấy ${groups.length} nhóm.`);
-        
-        // Phát sự kiện từng nhóm tìm được
         for (const g of groups) {
             logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_discovered', group: g })}`);
         }
-
         return groups;
     } catch (e) {
         logCallback(`[Discovery] Lỗi: ${e.message}`);
@@ -135,9 +114,7 @@ async function execJoinGroup(context, groupUrl, logCallback = () => {}) {
                 }
             } catch(e) {}
         }
-
         if (!joined) {
-            // Fallback: Tìm text Tham gia trong toàn bộ button
             const buttons = await page.$$('div[role="button"]');
             for (const btn of buttons) {
                 const text = await btn.innerText();
@@ -149,10 +126,8 @@ async function execJoinGroup(context, groupUrl, logCallback = () => {}) {
                 }
             }
         }
-
         if (joined) {
             await page.waitForTimeout(1000);
-            // Có thể có câu hỏi gia nhập
             const hasQuestions = await page.evaluate(() => {
                 return document.body.innerText.includes('Câu hỏi gia nhập') || document.body.innerText.includes('Membership Questions');
             });
@@ -164,7 +139,6 @@ async function execJoinGroup(context, groupUrl, logCallback = () => {}) {
             logCallback(`[AutoJoin] Không tìm thấy nút tham gia (Có thể đã tham gia rồi).`);
             return false;
         }
-
     } catch (e) {
         logCallback(`[AutoJoin] Lỗi khi tham gia ${groupUrl}: ${e.message}`);
         return false;
