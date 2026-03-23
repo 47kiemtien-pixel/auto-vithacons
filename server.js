@@ -23,9 +23,20 @@ app.use((err, req, res, next) => {
 
 const PORT = 3001;
 const settingsPath = path.join(__dirname, 'settings.json');
-const groupsDataPath = path.join(__dirname, 'groups_data.json');
 const postedHistoryPath = path.join(__dirname, 'posted_history.txt');
 const APP_TIMEZONE = 'Asia/Ho_Chi_Minh';
+
+const SUPPORTED_PAGES = [
+    { id: '61582480582780', name: 'Thang Máy Nhập Khẩu Việt Thành' },
+    { id: '100063596562296', name: 'CTy TNHH CK XD TM VIỆT THÀNH - NHÀ THÉP VIỆT' },
+    { id: '61555628966477', name: 'VIỆT THÀNH DOOR' },
+    { id: '100006184008355', name: 'Trần Minh Thiện' }
+];
+
+function getGroupsDataPath(pageId) {
+    if (!pageId) return path.join(__dirname, 'groups_data.json');
+    return path.join(__dirname, `groups_data_${pageId}.json`);
+}
 
 let isPosting = false;
 let isScanning = false;
@@ -101,33 +112,47 @@ function enrichGroupWithPostedHistory(group, postedHistoryMap = null) {
         ...group,
         lastBotPostedAt: postedTs,
         postedTime: formatDateTimeVN(postedTs),
-        lastPostStatus: isRecent ? 'Đã đăng bởi bot < 2 ngày' : (group.lastPostStatus || 'Đã đăng thành công'),
-        isSelectable: isRecent ? false : group.isSelectable
+        lastPostStatus: group.lastPostStatus || 'Sẵn sàng',
+        isSelectable: group.isSelectable ?? true
     };
 }
 
-function readGroupsData() {
-    if (!fs.existsSync(groupsDataPath)) return [];
+function readGroupsData(pageId) {
+    const dataPath = getGroupsDataPath(pageId);
+    if (!fs.existsSync(dataPath)) {
+        // Fallback to old file if it's the first page and old file exists
+        const oldPath = path.join(__dirname, 'groups_data.json');
+        if (pageId === SUPPORTED_PAGES[0].id && fs.existsSync(oldPath)) {
+            try {
+                const data = fs.readFileSync(oldPath, 'utf-8');
+                fs.writeFileSync(dataPath, data);
+                // Keep the old file as backup or delete it later
+            } catch (e) {}
+        } else {
+            return [];
+        }
+    }
     try {
         const postedHistoryMap = readPostedHistoryMap();
-        const rawGroups = JSON.parse(fs.readFileSync(groupsDataPath, 'utf-8'));
+        const rawGroups = JSON.parse(fs.readFileSync(dataPath, 'utf-8'));
         return rawGroups.map((group) => enrichGroupWithPostedHistory(group, postedHistoryMap));
     } catch (_) {
         return [];
     }
 }
 
-function writeGroupsData(groups) {
-    fs.writeFileSync(groupsDataPath, JSON.stringify(groups, null, 2));
+function writeGroupsData(groups, pageId) {
+    const dataPath = getGroupsDataPath(pageId);
+    fs.writeFileSync(dataPath, JSON.stringify(groups, null, 2));
 }
 
-function upsertGroupData(group) {
+function upsertGroupData(group, pageId) {
     if (!group || !group.url) return;
-    const groups = readGroupsData();
+    const groups = readGroupsData(pageId);
     const index = groups.findIndex((g) => g.url === group.url);
     if (index === -1) groups.push({ ...group, isSelectable: true });
     else groups[index] = { ...groups[index], ...group };
-    writeGroupsData(groups);
+    writeGroupsData(groups, pageId);
 }
 
 function normalizeKeyword(text = '') {
@@ -157,7 +182,7 @@ function isValidVisibleGroup(group) {
     return true;
 }
 
-async function harvestVisibleGroups(context, keyword = '') {
+async function harvestVisibleGroups(context, keyword = '', pageId) {
     const normalizedKeyword = normalizeKeyword(keyword);
     const pages = context.pages().filter((page) => /facebook\.com/i.test(page.url()));
     const harvested = [];
@@ -166,8 +191,19 @@ async function harvestVisibleGroups(context, keyword = '') {
             const groupsOnPage = await page.evaluate(() => {
                 const anchors = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
                 const seen = new Set();
-                const cleanText = (value) => (value || '').replace(/\s+/g, ' ').trim();
+                const cleanText = (v) => (v || '').replace(/\s+/g, ' ').trim();
                 const rows = [];
+                const cleanGroupName = (name) => {
+                    if (!name) return '';
+                    const splitters = [' Lần hoạt động', ' thành viên', ' member', ' bài viết', ' hoạt động gần đây', ' phút', ' giờ', ' ngày'];
+                    let cleaned = name;
+                    for (const s of splitters) {
+                        const parts = cleaned.split(s);
+                        if (parts.length > 1) cleaned = parts[0];
+                    }
+                    return cleaned.trim();
+                };
+
                 for (const anchor of anchors) {
                     const href = anchor.getAttribute('href') || '';
                     if (!href) continue;
@@ -177,13 +213,9 @@ async function harvestVisibleGroups(context, keyword = '') {
                     const groupId = decodeURIComponent(match[1] || '').trim();
                     if (!groupId) continue;
                     if (['feed', 'joins', 'discover', 'search', 'create', 'notifications'].includes(groupId.toLowerCase())) continue;
-                    const card = anchor.closest('[role="article"], [role="listitem"], [data-visualcompletion], li, div');
-                    const parts = [
-                        cleanText(anchor.innerText),
-                        cleanText(anchor.getAttribute('aria-label')),
-                        cleanText(card?.innerText)
-                    ].filter(Boolean);
-                    const name = parts.sort((a, b) => b.length - a.length)[0] || groupId;
+                    
+                    const rawName = cleanText(anchor.innerText) || cleanText(anchor.getAttribute('aria-label')) || groupId;
+                    const name = cleanGroupName(rawName);
                     const key = `${groupId}|${absoluteUrl}`;
                     if (seen.has(key)) continue;
                     seen.add(key);
@@ -198,7 +230,7 @@ async function harvestVisibleGroups(context, keyword = '') {
     }
     let added = 0;
     let updated = 0;
-    const currentGroups = readGroupsData();
+    const currentGroups = readGroupsData(pageId);
     for (const group of harvested) {
         if (!isValidVisibleGroup(group)) continue;
         if (normalizedKeyword && !normalizeKeyword(group.name).includes(normalizedKeyword)) continue;
@@ -209,7 +241,7 @@ async function harvestVisibleGroups(context, keyword = '') {
             lastPostStatus: existing?.lastPostStatus || 'Sẵn sàng',
             isSelectable: existing?.isSelectable ?? true
         };
-        upsertGroupData(mergedGroup);
+        upsertGroupData(mergedGroup, pageId);
         if (existing) {
             updated += 1;
             broadcastLog({ type: 'group_updated', group: mergedGroup, source: 'visible-harvest' });
@@ -224,8 +256,13 @@ async function harvestVisibleGroups(context, keyword = '') {
     return { added, updated };
 }
 
+app.get('/api/pages', (req, res) => {
+    res.json(SUPPORTED_PAGES);
+});
+
 app.get('/api/groups', (req, res) => {
-    res.json(readGroupsData());
+    const pageId = req.query.pageId;
+    res.json(readGroupsData(pageId));
 });
 
 app.get('/api/settings', (req, res) => {
@@ -233,7 +270,8 @@ app.get('/api/settings', (req, res) => {
 });
 
 app.get('/api/worker-status', (req, res) => {
-    const groups = readGroupsData();
+    const pageId = req.query.pageId;
+    const groups = readGroupsData(pageId);
     res.json({
         isRunning: isPosting,
         pendingCount: groups.filter(g => g.isSelectable).length,
@@ -258,6 +296,7 @@ app.post('/api/fetch-groups', async (req, res) => {
     isScanning = true;
     scanControl = { cancelled: false };
     const keyword = req.body.keyword || '';
+    const pageId = req.body.pageId;
     broadcastLog({ type: 'info', message: `Bắt đầu quét nhóm đã tham gia: "${keyword}"`, source: 'scanning' });
     try {
         const context = await browserManager.getContext();
@@ -266,7 +305,7 @@ app.post('/api/fetch-groups', async (req, res) => {
                 if (msg.startsWith('[FB_EVENT] ')) {
                     try {
                         const event = JSON.parse(msg.substring(11));
-                        if (event.type === 'group_found' || event.type === 'group_updated') upsertGroupData(event.group);
+                        if (event.type === 'group_found' || event.type === 'group_updated') upsertGroupData(event.group, pageId);
                         broadcastLog({ ...event, source: 'scanning' });
                     } catch(e) {}
                 } else broadcastLog({ type: 'info', message: msg, source: 'scanning' });
@@ -295,9 +334,10 @@ app.post('/api/start-visible-harvest', async (req, res) => {
     try {
         const context = await browserManager.getContext();
         const keyword = req.body?.keyword || '';
+        const pageId = req.body.pageId;
         isHarvestingVisible = true;
         visibleHarvestTimer = setInterval(async () => {
-            if (isHarvestingVisible) await harvestVisibleGroups(context, keyword).catch(() => {});
+            if (isHarvestingVisible) await harvestVisibleGroups(context, keyword, pageId).catch(() => {});
         }, 4000);
         broadcastLog({ type: 'start', message: 'Đã bật thu nhóm từ màn hình.', source: 'visible-harvest' });
         res.json({ success: true });
@@ -314,14 +354,21 @@ app.post('/api/stop-visible-harvest', (req, res) => {
 });
 
 app.post('/api/discover-groups', (req, res) => {
-    runDiscoveryProcess(req.body.keyword || '', req.body.autoJoin === true);
+    runDiscoveryProcess(req.body.keyword || '', req.body.autoJoin === true, req.body.pageId);
     res.json({ success: true, message: 'Đang khám phá ngầm...' });
 });
 
 app.post('/api/join-group', async (req, res) => {
+    const { url, name, pageId } = req.body;
     try {
         const context = await browserManager.getContext();
-        const success = await execJoinGroup(context, req.body.url, (msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
+        const success = await execJoinGroup(context, url, (msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
+        if (success && pageId && name) {
+            const match = url.match(/facebook\.com\/groups\/([^/?#]+)/i);
+            const groupId = match ? decodeURIComponent(match[1]).trim() : 'unknown';
+            upsertGroupData({ id: groupId, name, url, lastPostStatus: 'Sẵn sàng', isSelectable: true }, pageId);
+            broadcastLog({ type: 'info', message: `Đã tự động thêm nhóm mới vào danh sách: ${name}`, source: 'discovery' });
+        }
         res.json({ success });
     } catch (e) {
         res.status(500).json({ error: e.message });
@@ -329,7 +376,7 @@ app.post('/api/join-group', async (req, res) => {
 });
 
 app.post('/api/post', async (req, res) => {
-    const { groups, postContent, imageFolderPath } = req.body;
+    const { groups, postContent, imageFolderPath, pageId } = req.body;
     if (!groups?.length) return res.status(400).json({ error: 'Thiếu danh sách nhóm.' });
     isPosting = true;
     res.json({ success: true, message: 'Bắt đầu đăng bài.' });
@@ -338,7 +385,7 @@ app.post('/api/post', async (req, res) => {
         const settings = readSettings();
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });
-            if (event.type === 'success' && event.groupUrl) markGroupAfterSuccess(event.groupUrl, event.status);
+            if (event.type === 'success' && event.groupUrl) markGroupAfterSuccess(event.groupUrl, event.status, pageId);
         }, context, postContent, imageFolderPath, settings.delayBetweenPostsMinutes);
     } catch (e) {
         broadcastLog({ type: 'error', message: `Lỗi: ${e.message}`, source: 'posting' });
@@ -348,8 +395,8 @@ app.post('/api/post', async (req, res) => {
     }
 });
 
-function markGroupAfterSuccess(groupUrl, status = 'published') {
-    const groups = readGroupsData();
+function markGroupAfterSuccess(groupUrl, status = 'published', pageId) {
+    const groups = readGroupsData(pageId);
     const index = groups.findIndex((g) => g.url === groupUrl);
     if (index === -1) return;
     const ts = Date.now();
@@ -357,11 +404,11 @@ function markGroupAfterSuccess(groupUrl, status = 'published') {
         ...groups[index],
         lastBotPostedAt: ts,
         postedTime: formatDateTimeVN(ts),
-        isSelectable: false,
-        lastPostStatus: status === 'pending' ? 'Đang chờ duyệt' : 'Đã đăng < 2 ngày'
+        isSelectable: true,
+        lastPostStatus: status === 'pending' ? 'Đang chờ duyệt' : 'Đã đăng'
     };
     groups[index] = updated;
-    writeGroupsData(groups);
+    writeGroupsData(groups, pageId);
     broadcastLog({ type: 'group_updated', group: updated, source: 'posting' });
 }
 
@@ -380,15 +427,16 @@ app.get('/api/logs', (req, res) => {
     req.on('close', () => activeClients = activeClients.filter(c => c.id !== client.id));
 });
 
-async function runDiscoveryProcess(keyword, autoJoin = false) {
+async function runDiscoveryProcess(keyword, autoJoin = false, pageId) {
     if (isDiscovering) return;
     isDiscovering = true;
     broadcastLog({ type: 'info', message: `🔍 Khám phá nhóm: "${keyword}"`, source: 'discovery' });
     try {
         const context = await browserManager.getContext();
         const automator = new FBAutomator((msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
-        await automator.init(context);
-        await automator.login();
+        // Không gọi init/login ở đây vì context đã được browserManager quản lý và có thể đã login rồi.
+        // Tuy nhiên để an toàn nếu FBAutomator cần:
+        // await automator.init(context); 
         const groups = await execDiscoverGroups(context, keyword, (msg) => {
             if (typeof msg === 'string' && msg.startsWith('[FB_EVENT] ')) {
                 try { broadcastLog({ ...JSON.parse(msg.substring(11)), source: 'discovery' }); } catch(e) {}
@@ -396,7 +444,12 @@ async function runDiscoveryProcess(keyword, autoJoin = false) {
         });
         if (autoJoin) {
             for (const g of groups.filter(x => x.canJoin && !x.isJoined)) {
-                await execJoinGroup(context, g.url, (m) => broadcastLog({ type: 'info', message: m, source: 'discovery' }));
+                const success = await execJoinGroup(context, g.url, (m) => broadcastLog({ type: 'info', message: m, source: 'discovery' }));
+                if (success && pageId) {
+                    const match = g.url.match(/facebook\.com\/groups\/([^/?#]+)/i);
+                    const groupId = match ? decodeURIComponent(match[1]).trim() : 'unknown';
+                    upsertGroupData({ id: groupId, name: g.name, url: g.url, lastPostStatus: 'Sẵn sàng', isSelectable: true }, pageId);
+                }
                 await new Promise(r => setTimeout(r, 5000));
             }
         }

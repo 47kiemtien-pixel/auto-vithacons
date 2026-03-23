@@ -37,6 +37,17 @@ async function execGetGroups(primaryContext, keyword = '', logCallback = () => {
                 const list = [];
                 const seen = new Set();
                 const cleanText = (v) => (v || '').replace(/\s+/g, ' ').trim();
+                const cleanGroupName = (name) => {
+                    if (!name) return '';
+                    // Tách bỏ phần thông tin bổ sung (thời gian hoạt động, số thành viên, bài viết mới)
+                    const splitters = [' Lần hoạt động', ' thành viên', ' member', ' bài viết', ' hoạt động gần đây', ' phút', ' giờ', ' ngày'];
+                    let cleaned = name;
+                    for (const s of splitters) {
+                        const parts = cleaned.split(s);
+                        if (parts.length > 1) cleaned = parts[0];
+                    }
+                    return cleaned.trim();
+                };
                 
                 for (const a of anchors) {
                     const href = a.getAttribute('href') || '';
@@ -50,15 +61,10 @@ async function execGetGroups(primaryContext, keyword = '', logCallback = () => {
                     if (seen.has(url)) continue;
                     seen.add(url);
                     
-                    const card = a.closest('[role="listitem"], [role="article"], li, div');
-                    const parts = [
-                        cleanText(a.innerText),
-                        cleanText(a.getAttribute('aria-label')),
-                        cleanText(card?.innerText)
-                    ].filter(Boolean);
-                    const name = parts.sort((a, b) => b.length - a.length)[0] || id;
+                    const rawName = cleanText(a.innerText) || cleanText(a.getAttribute('aria-label')) || id;
+                    const name = cleanGroupName(rawName);
                     
-                    list.push({ id, name, url });
+                    list.push({ id, name, url, lastPostStatus: 'Sẵn sàng', isSelectable: true });
                 }
                 return list;
             });
@@ -78,7 +84,7 @@ async function execGetGroups(primaryContext, keyword = '', logCallback = () => {
             // Emit found groups
             for (const g of currentGroups) {
                 if (normalizedKeyword && !normalizeText(g.name).includes(normalizedKeyword)) continue;
-                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: { ...g, lastPostStatus: 'Sẵn sàng', isSelectable: true } })}`);
+                logCallback(`[FB_EVENT] ${JSON.stringify({ type: 'group_found', group: g })}`);
             }
         }
     } catch (e) {

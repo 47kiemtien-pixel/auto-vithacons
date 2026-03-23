@@ -25,6 +25,9 @@ function App() {
   const [workerStatus, setWorkerStatus] = useState({ isRunning: false, pendingCount: 0, isScanning: false, isDiscovering: false });
   const [isWorkerActionLoading, setIsWorkerActionLoading] = useState(false);
   const [theme, setTheme] = useState('light');
+  const [pages, setPages] = useState([]);
+  const [selectedPageId, setSelectedPageId] = useState(localStorage.getItem('selectedPageId') || '');
+
 
   const API_BASE = 'http://localhost:3001/api';
 
@@ -33,19 +36,40 @@ function App() {
   }, [theme]);
 
   useEffect(() => {
-    fetchGroups();
+    fetchPages();
     fetchSettings();
-    fetchWorkerStatus();
     const cleanup = setupSSE();
     return cleanup;
   }, []);
 
-  const fetchGroups = async () => {
+  useEffect(() => {
+    if (selectedPageId) {
+      fetchGroups();
+      fetchWorkerStatus();
+      localStorage.setItem('selectedPageId', selectedPageId);
+    }
+  }, [selectedPageId]);
+
+  const fetchPages = async () => {
     try {
-      const res = await fetch(`${API_BASE}/groups`);
+      const res = await fetch(`${API_BASE}/pages`);
+      if (res.ok) {
+        const data = await res.json();
+        setPages(data);
+        // Ngừng tự động chọn page đầu tiên để bắt người dùng phải chọn
+      }
+    } catch (error) { console.error('Fetch pages failed:', error); }
+  };
+
+
+  const fetchGroups = async () => {
+    if (!selectedPageId) return;
+    try {
+      const res = await fetch(`${API_BASE}/groups?pageId=${selectedPageId}`);
       if (res.ok) setGroups(await res.json());
     } catch (error) { console.error('Fetch groups failed:', error); }
   };
+
 
   const fetchSettings = async () => {
     try {
@@ -58,11 +82,13 @@ function App() {
   };
 
   const fetchWorkerStatus = async () => {
+    if (!selectedPageId) return;
     try {
-      const res = await fetch(`${API_BASE}/worker-status`);
+      const res = await fetch(`${API_BASE}/worker-status?pageId=${selectedPageId}`);
       if (res.ok) setWorkerStatus(await res.json());
     } catch (error) { console.error('Fetch worker status failed:', error); }
   };
+
 
   const triggerWorkerAction = async (endpoint) => {
     try {
@@ -147,15 +173,17 @@ function App() {
   };
 
   const triggerFetchMyGroups = async (keyword) => {
+    if (!selectedPageId) return;
     try {
       setIsScanning(true);
       await fetch(`${API_BASE}/fetch-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword })
+        body: JSON.stringify({ keyword, pageId: selectedPageId })
       });
-    } catch (e) { setIsScanning(false); }
+    } catch (e) { setIsScanning(true); setIsScanning(false); }
   };
+
 
   const triggerDiscoverGroups = async (keyword) => {
     try {
@@ -165,37 +193,41 @@ function App() {
       await fetch(`${API_BASE}/discover-groups`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ keyword, autoJoin })
+        body: JSON.stringify({ keyword, autoJoin, pageId: selectedPageId })
       });
     } catch (e) { setIsDiscovering(false); }
   };
 
-  const handleJoinGroup = async (url) => {
+   const handleJoinGroup = async (url) => {
+    const group = discoveredGroups.find(g => g.url === url);
+    if (!group || !selectedPageId) return;
     try {
       const res = await fetch(`${API_BASE}/join-group`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ url })
+        body: JSON.stringify({ url, name: group.name, pageId: selectedPageId })
       });
       const data = await res.json();
       if (data.success) {
         setDiscoveredGroups(prev => prev.map(g => g.url === url ? { ...g, isJoined: true, canJoin: false } : g));
+        fetchGroups(); // Refresh list to show the newly joined group
       }
     } catch (e) { console.error('Join group failed:', e); }
   };
 
   const handleStartPosting = async () => {
-    if (selectedGroups.size === 0) return;
+    if (selectedGroups.size === 0 || !selectedPageId) return;
     const groupList = groups.filter(g => selectedGroups.has(g.url));
     setIsPosting(true);
     try {
       await fetch(`${API_BASE}/post`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groups: groupList, postContent, imageFolderPath })
+        body: JSON.stringify({ groups: groupList, postContent, imageFolderPath, pageId: selectedPageId })
       });
     } catch (error) { setIsPosting(false); }
   };
+
 
   const toggleSelect = (url) => {
     const next = new Set(selectedGroups);
@@ -229,7 +261,24 @@ function App() {
           </div>
 
         <div className="flex-none flex items-center gap-4">
+           {/* Page Selector */}
+           <div className="form-control">
+             <label className="label py-1">
+               <span className="label-text text-[10px] font-bold uppercase opacity-50">Đang dùng Page</span>
+             </label>
+             <select 
+               className="select select-bordered select-sm rounded-xl font-bold bg-base-200 focus:bg-base-100 min-w-[200px]"
+               value={selectedPageId}
+               onChange={(e) => setSelectedPageId(e.target.value)}
+             >
+               {pages.map(page => (
+                 <option key={page.id} value={page.id}>{page.name}</option>
+               ))}
+             </select>
+           </div>
+
            {/* Global Stats */}
+
            <div className="hidden lg:flex stats shadow bg-base-200">
              <div className="stat px-4 py-2">
                <div className="stat-title text-[10px] uppercase font-black opacity-50">Sẵn sàng đăng</div>
@@ -278,7 +327,11 @@ function App() {
                triggerDiscoverGroups={triggerDiscoverGroups}
                stopDiscovering={() => fetch(`${API_BASE}/stop-discover`, { method: 'POST' })}
                isHarvestingVisible={isHarvestingVisible}
-               startVisibleHarvest={() => fetch(`${API_BASE}/start-visible-harvest`, { method: 'POST' })}
+               startVisibleHarvest={() => fetch(`${API_BASE}/start-visible-harvest`, { 
+                  method: 'POST', 
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ pageId: selectedPageId })
+                })}
                stopVisibleHarvest={() => fetch(`${API_BASE}/stop-visible-harvest`, { method: 'POST' })}
                handleJoinGroup={handleJoinGroup}
             />
@@ -335,6 +388,41 @@ function App() {
           </div>
         </div>
       </main>
+
+      {/* Mandatory Page Selector Overlay */}
+      {!selectedPageId && (
+        <div className="fixed inset-0 z-[100] bg-base-300/80 backdrop-blur-md flex items-center justify-center p-4">
+          <div className="bg-base-100 p-8 rounded-3xl shadow-2xl max-w-md w-full border border-primary/20 flex flex-col items-center gap-6 animate-in fade-in zoom-in duration-300">
+             <div className="w-20 h-20 rounded-3xl bg-primary text-primary-content flex items-center justify-center shadow-2xl shadow-primary/30">
+                <Icon.Bot size={40} />
+             </div>
+             <div className="text-center">
+                <h2 className="text-2xl font-black mb-1">Chào mừng bạn!</h2>
+                <p className="text-sm opacity-60 font-medium">Vui lòng chọn Fanpage bạn muốn quản lý để tiếp tục.</p>
+             </div>
+             
+             <div className="w-full space-y-4">
+               <div className="grid gap-2">
+                 {pages.map(page => (
+                   <button 
+                     key={page.id}
+                     onClick={() => setSelectedPageId(page.id)}
+                     className="btn btn-lg btn-outline hover:btn-primary border-2 rounded-2xl flex items-center justify-between px-6 group transition-all"
+                   >
+                     <div className="flex flex-col items-start">
+                        <span className="text-xs font-black opacity-40 uppercase tracking-tighter">Fanpage</span>
+                        <span className="font-bold">{page.name}</span>
+                     </div>
+                     <Icon.Group className="opacity-0 group-hover:opacity-100 transition-all" />
+                   </button>
+                 ))}
+               </div>
+             </div>
+             
+             <p className="text-[10px] font-bold opacity-30 uppercase tracking-[0.2em]">Hệ thống PostBot 6.0 Premium</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
