@@ -23,7 +23,19 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
             const results = [];
             const allLinks = Array.from(document.querySelectorAll('a[href*="/groups/"]'));
             const processedUrls = new Set();
-            const lowerKw = kw.toLowerCase();
+            
+            const normalizeText = (value) => {
+                return (value || '')
+                    .normalize('NFD')
+                    .replace(/[\u0300-\u036f]/g, '')
+                    .replace(/đ/g, 'd')
+                    .replace(/Đ/g, 'D')
+                    .replace(/\s+/g, ' ')
+                    .trim()
+                    .toLowerCase();
+            };
+
+            const normalizedKw = normalizeText(kw);
 
             allLinks.forEach(link => {
                 let fullUrl = link.href.split('?')[0];
@@ -39,7 +51,7 @@ async function execDiscoverGroups(context, keyword, logCallback = () => {}) {
                     const lines = text.split('\n').filter(l => l.trim());
                     if (lines.length >= 1) {
                         const name = lines[0];
-                        if (!name.toLowerCase().includes(lowerKw)) return; 
+                        if (normalizedKw && !normalizeText(name).includes(normalizedKw)) return; 
                         const info = lines.find(l => l.includes('thành viên') || l.includes('members')) || '';
                         
                         let joinBtnFound = false;

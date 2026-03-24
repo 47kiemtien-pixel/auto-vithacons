@@ -3,6 +3,7 @@ import { Icon } from './Icon';
 import GroupCard from './GroupCard';
 
 const Sidebar = ({ 
+  normalizeText,
   groups, discoveredGroups, activeTab, setActiveTab,
   selectedGroups, toggleSelect, toggleAll, toggleByTag,
   isScanning, triggerFetchMyGroups, stopScanning,
@@ -15,7 +16,7 @@ const Sidebar = ({
   const [statusFilter, setStatusFilter] = useState('all');
 
   const filteredMyGroups = groups.filter(g => {
-    const nameMatch = (g.name || '').toLowerCase().includes(searchMyGroups.toLowerCase());
+    const nameMatch = normalizeText(g.name || '').includes(normalizeText(searchMyGroups));
     if (!nameMatch) return false;
     if (statusFilter === 'all') return true;
     if (statusFilter === 'ready') return !g.lastPostStatus;

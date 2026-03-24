@@ -7,6 +7,18 @@ import { Icon } from './components/Icon'
 
 function App() {
   const APP_TIMEZONE = 'Asia/Ho_Chi_Minh';
+  
+  const normalizeText = (value) => {
+    return (value || '')
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/đ/g, 'd')
+      .replace(/Đ/g, 'D')
+      .replace(/\s+/g, ' ')
+      .trim()
+      .toLowerCase();
+  };
+
   const [groups, setGroups] = useState([]);
   const [discoveredGroups, setDiscoveredGroups] = useState([]);
   const [selectedGroups, setSelectedGroups] = useState(new Set());
@@ -265,12 +277,12 @@ function App() {
 
   const toggleByTag = (input) => {
     if (!input) return;
-    const tags = input.split(/[,;\s]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
+    const tags = input.split(/[,;]+/).map(t => t.trim().toLowerCase()).filter(Boolean);
     if (tags.length === 0) return;
 
     const matchingGroups = groups.filter(g => {
-      const name = (g.name || '').toLowerCase();
-      return tags.some(tag => name.includes(tag));
+      const name = normalizeText(g.name || '');
+      return tags.some(tag => name.includes(normalizeText(tag)));
     });
 
     if (matchingGroups.length === 0) return;
@@ -355,6 +367,7 @@ function App() {
           {/* Column 1: Groups & Discovery */}
           <div className="xl:col-span-1 h-full min-h-0 flex flex-col gap-6">
             <Sidebar 
+               normalizeText={normalizeText}
                groups={groups} 
                discoveredGroups={discoveredGroups}
                activeTab={activeTab}
