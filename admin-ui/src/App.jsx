@@ -260,6 +260,37 @@ function App() {
   };
 
 
+  const handleDeleteGroup = async (url) => {
+    if (!selectedPageId) return;
+    try {
+      const res = await fetch(`${API_BASE}/delete-group`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ url, pageId: selectedPageId })
+      });
+      const data = await res.json();
+      if (data.success) fetchGroups();
+    } catch (e) { console.error('Delete group failed:', e); }
+  };
+
+  const handleDeleteAllGroups = async () => {
+    if (!selectedPageId) return;
+    if (!confirm('Bạn có chắc chắn muốn xóa TOÀN BỘ nhóm trong danh sách? Khuyến nghị tải lại trang (F5) nếu thấy lỗi.')) return;
+    try {
+      const res = await fetch(`${API_BASE}/delete-all-groups`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId: selectedPageId })
+      });
+      const data = await res.json();
+      if (data.success) {
+        setGroups([]); // Clear UI immediately
+        setSelectedGroups(new Set());
+        fetchGroups();
+      }
+    } catch (e) { console.error('Delete all groups failed:', e); }
+  };
+
   const toggleSelect = (url) => {
     const group = groups.find(g => g.url === url);
     if (group && group.isSelectable === false) return;
@@ -390,6 +421,8 @@ function App() {
                 })}
                stopVisibleHarvest={() => fetch(`${API_BASE}/stop-visible-harvest`, { method: 'POST' })}
                handleJoinGroup={handleJoinGroup}
+               handleDeleteGroup={handleDeleteGroup}
+               handleDeleteAllGroups={handleDeleteAllGroups}
             />
           </div>
 

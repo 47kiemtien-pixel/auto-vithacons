@@ -11,8 +11,17 @@ const dotenv = require('dotenv');
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+// Tăng giới hạn body để nhận được danh sách nhóm lớn
+app.use(express.json({ limit: '10mb' }));
+app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 
+// Logger toàn cục để kiểm tra mọi yêu cầu đến server
+app.use((req, res, next) => {
+    console.log(`[REQ] ${req.method} ${req.url}`);
+    next();
+});
+
+// Middleware xử lý lỗi JSON body không hợp lệ (phải đặt sau express.json)
 app.use((err, req, res, next) => {
     if (err instanceof SyntaxError && err.status === 400 && 'body' in err) {
         console.error('[Server] Lỗi JSON body không hợp lệ:', err.message);
@@ -30,7 +39,8 @@ const SUPPORTED_PAGES = [
     { id: '61582480582780', name: 'Thang Máy Nhập Khẩu Việt Thành' },
     { id: '100063596562296', name: 'CTy TNHH CK XD TM VIỆT THÀNH - NHÀ THÉP VIỆT' },
     { id: '61555628966477', name: 'VIỆT THÀNH DOOR' },
-    { id: '100006184008355', name: 'Trần Minh Thiện' }
+    { id: '100006184008355', name: 'Trần Minh Thiện' },
+    { id: '100089836008817', name: 'Ylang Wellness Retreat' }
 ];
 
 function getGroupsDataPath(pageId) {
@@ -147,9 +157,18 @@ function writeGroupsData(groups, pageId) {
 }
 
 function upsertGroupData(group, pageId) {
-    if (!group || !group.url) return;
+    if (!group || (!group.url && !group.id)) return;
     const groups = readGroupsData(pageId);
-    const index = groups.findIndex((g) => g.url === group.url);
+    
+    const normalizeUrl = (u) => (u || '').replace(/\/$/, '').toLowerCase();
+    
+    const index = groups.findIndex((g) => {
+        if (g.id && group.id && g.id !== 'unknown' && group.id !== 'unknown') {
+            return String(g.id) === String(group.id);
+        }
+        return normalizeUrl(g.url) === normalizeUrl(group.url);
+    });
+
     if (index === -1) groups.push(group);
     else groups[index] = { ...groups[index], ...group };
     writeGroupsData(groups, pageId);
@@ -301,6 +320,7 @@ app.post('/api/settings', (req, res) => {
 });
 
 app.post('/api/fetch-groups', async (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
     if (isScanning) return res.status(400).json({ error: 'Tiến trình quét đang chạy.' });
     isScanning = true;
     scanControl = { cancelled: false };
@@ -339,6 +359,7 @@ app.post('/api/stop-scan', (req, res) => {
 });
 
 app.post('/api/start-visible-harvest', async (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
     if (isHarvestingVisible) return res.status(400).json({ error: 'Đang chạy rồi.' });
     try {
         const context = await browserManager.getContext();
@@ -363,11 +384,13 @@ app.post('/api/stop-visible-harvest', (req, res) => {
 });
 
 app.post('/api/discover-groups', (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
     runDiscoveryProcess(req.body.keyword || '', req.body.autoJoin === true, req.body.pageId);
     res.json({ success: true, message: 'Đang khám phá ngầm...' });
 });
 
 app.post('/api/join-group', async (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
     const { url, name, pageId } = req.body;
     try {
         const context = await browserManager.getContext();
@@ -384,13 +407,43 @@ app.post('/api/join-group', async (req, res) => {
     }
 });
 
+app.post('/api/delete-group', (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
+    const { url, pageId } = req.body;
+    if (!url || !pageId) return res.status(400).json({ error: 'Thiếu url hoặc pageId' });
+    const groups = readGroupsData(pageId).filter(g => g.url !== url);
+    writeGroupsData(groups, pageId);
+    broadcastLog({ type: 'info', message: `Đã xóa nhóm khỏi danh sách.`, source: 'settings' });
+    res.json({ success: true });
+});
+
+app.post('/api/delete-all-groups', (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
+    const { pageId } = req.body;
+    if (!pageId) return res.status(400).json({ error: 'Thiếu pageId' });
+    writeGroupsData([], pageId);
+    broadcastLog({ type: 'info', message: `Đã xóa TOÀN BỘ nhóm khỏi danh sách.`, source: 'settings' });
+    res.json({ success: true });
+});
+
 app.post('/api/post', async (req, res) => {
+    if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
     const { groups, postContent, imageFolderPath, pageId } = req.body;
     if (!groups?.length) return res.status(400).json({ error: 'Thiếu danh sách nhóm.' });
     isPosting = true;
     res.json({ success: true, message: 'Bắt đầu đăng bài.' });
+    
+    // Gửi log đầu tiên ngay lập tức
+    console.log('>>> NHẬN LỆNH ĐĂNG BÀI: ', groups.length, 'nhóm');
+    broadcastLog({ type: 'info', message: '🚀 PHÁT LỆNH: Bắt đầu tiến trình đăng bài...', source: 'posting' });
+
     try {
+        console.log('>>> Đang kết nối trình duyệt...');
+        broadcastLog({ type: 'info', message: '⏳ Đang kết nối với trình duyệt Cốc Cốc...', source: 'posting' });
         const context = await browserManager.getContext();
+        console.log('>>> Đã có context trình duyệt.');
+        broadcastLog({ type: 'info', message: '✅ Đã kết nối trình duyệt. Đang chuẩn bị nội dung...', source: 'posting' });
+        
         const settings = readSettings();
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });

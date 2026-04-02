@@ -910,35 +910,47 @@ class FBAutomator {
             }
 
             const inputSelector = 'div[role="dialog"] div[role="textbox"][contenteditable="true"]';
-            await this.page.waitForSelector(inputSelector);
-            await sleep(1000);
+            try {
+                await this.page.waitForSelector(inputSelector, { timeout: 10000 });
+            } catch (e) {
+                this.log('[FB] Không thấy ô nhập văn bản sau 10s.');
+            }
+
+            await sleep(500);
             const textboxes = await this.page.$$(inputSelector);
             let typed = false;
             for(let tb of textboxes) {
                 if(await tb.isVisible()) {
-                    this.log('[FB] Tìm thấy ô nhập chữ trong dialog, tiến hành gõ nội dung...');
-                    await tb.click();
-                    await sleep(250);
+                    this.log('[FB] Đã thấy ô soạn bài, đang chuẩn bị nhập nội dung...');
+                    await tb.click({ delay: 100 });
+                    await tb.focus();
+                    await sleep(400);
+                    // Đảm bảo con trỏ ở cuối hoặc đã sẵn sàng
                     await this.page.keyboard.insertText(content);
                     typed = true;
+                    this.log('[FB] Đã nhập nội dung xong.');
                     break;
                 }
             }
             
             if(!typed) {
-                this.log('[FB] Vẫn không nhập được văn bản bằng click. Thử fallback...');
-                const fallbackInput = await this.page.$('div[aria-label="Bạn viết gì đi..."][contenteditable="true"]');
+                this.log('[FB] Thử nhập bằng phương pháp dự phòng (fill)...');
+                const fallbackInput = await this.page.$('div[aria-label*="Bạn viết gì đi"], div[aria-label*="Bạn đang nghĩ gì"], [contenteditable="true"]');
                 if (fallbackInput) {
-                    await fallbackInput.fill(content);
-                    typed = true;
+                    try {
+                        await fallbackInput.click();
+                        await fallbackInput.fill(content);
+                        typed = true;
+                        this.log('[FB] Đã nhập nội dung bằng phương pháp dự phòng.');
+                    } catch (e) {}
                 }
                 if (!typed) {
-                    this.log('[FB] Không nhập được nội dung vào ô soạn bài.');
+                    this.log('[FB] THẤT BẠI: Không tìm được ô soạn bài để nhập.');
                     return { success: false, pending: false, reason: 'textbox_not_found' };
                 }
             }
             
-            await sleep(500);
+            await sleep(800);
             this.log('[FB] Đang nhấn nút Đăng...');
             
             const submitButtonSelectors = [
@@ -958,18 +970,21 @@ class FBAutomator {
                         if (await el.isVisible()) {
                             let isDisabled = await el.getAttribute('aria-disabled');
                             let waitCount = 0;
-                            while (isDisabled === 'true' && waitCount < 30) {
-                                this.log(`[FB] Nút Đăng đang bị vô hiệu hóa, đợi thêm... (${waitCount * 2}s)`);
+                            // Giảm thời gian chờ xuống tối đa 15s cho mỗi nút để tránh treo quá lâu
+                            while ((isDisabled === 'true' || isDisabled === true) && waitCount < 15) {
+                                if (waitCount % 3 === 0) {
+                                    this.log(`[FB] Đang đợi ảnh tải lên/nút Đăng sẵn sàng... (${waitCount}s)`);
+                                }
                                 await sleep(1000);
                                 isDisabled = await el.getAttribute('aria-disabled');
                                 waitCount++;
                             }
 
-                            if (isDisabled !== 'true') {
+                            if (isDisabled !== 'true' && isDisabled !== true) {
                                 submitButton = el;
                                 break;
                             } else {
-                                this.log('[FB] Quá thời gian chờ tải ảnh, nút Đăng vẫn bị khóa.');
+                                this.log('[FB] Nút này vẫn bị khóa sau 15s, thử tìm nút khác hoặc phương thức khác.');
                             }
                         }
                     }
@@ -1032,26 +1047,31 @@ class FBAutomator {
                 
                 let postStatus = 'success';
                 try {
-                    await this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 30000 });
-                    this.log('[FB] Hộp thoại đăng bài đã đóng.');
+                    // Chờ dialog biến mất hoặc xuất hiện thông báo thành công
+                    const postDone = await Promise.race([
+                        this.page.waitForSelector('div[role="dialog"]', { state: 'hidden', timeout: 20000 }).then(() => 'hidden'),
+                        this.page.waitForSelector('text="Đã đăng thành công", text="Bài viết của bạn đang chờ"', { timeout: 20000 }).then(() => 'toast'),
+                        sleep(21000).then(() => 'timeout')
+                    ]);
+
+                    if (postDone === 'hidden' || postDone === 'toast') {
+                        this.log(`[FB] Đăng bài thành công (nhận diện qua: ${postDone}).`);
+                    } else {
+                        // Kiểm tra lỗi nếu quá 20s mà dialog vẫn còn
+                        const pageText = await this.page.innerText('body').catch(() => '');
+                        if (pageText.includes('tự động từ chối') || pageText.includes('không đáp ứng tiêu chí') || pageText.includes('Link')) {
+                            this.log('[FB] Phát hiện bài viết bị từ chối/hủy sau khi bấm Đăng.');
+                            if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
+                                postStatus = 'rejected_link';
+                            } else {
+                                postStatus = 'rejected_other';
+                            }
+                        } else {
+                            this.log('[FB] Cảnh báo: Hộp thoại chưa đóng sau 20s, có thể lag hoặc đã đăng xong thầm lặng.');
+                        }
+                    }
                 } catch(e) {
-                     const pageText = await this.page.innerText('body');
-                     if (pageText.includes('tự động từ chối bài viết') || pageText.includes('không đáp ứng tiêu chí') || pageText.includes('Liên kết trong bài viết')) {
-                         this.log('[FB] Phát hiện bài viết bị từ chối tự động.');
-                         if (pageText.includes('liên kết') || pageText.includes('link') || pageText.includes('Link')) {
-                             postStatus = 'rejected_link';
-                             this.log('[FB] Lý do: nhóm này cấm chèn link.');
-                         } else {
-                             postStatus = 'rejected_other';
-                         }
-                         
-                         try {
-                             const closeX = await this.page.$('div[aria-label="Đóng"], div[aria-label="Close"]');
-                             if (closeX) await closeX.click();
-                         } catch(e2) {}
-                     } else {
-                         this.log('[FB] Hộp thoại chưa đóng sau 30s và không thấy popup từ chối rõ ràng.');
-                     }
+                     this.log(`[FB] Lỗi khi đợi kết quả đăng: ${e.message}`);
                 }
                 
                 if (postStatus === 'rejected_link') return { success: false, pending: false, reason: 'rejected_link' };

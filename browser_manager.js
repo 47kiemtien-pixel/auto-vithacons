@@ -68,31 +68,36 @@ class BrowserManager {
         if (!this.context) {
             this.initializing = (async () => {
                 try {
+                    console.log('[BM] Đang chuẩn bị cấu hình khởi chạy Cốc Cốc...');
                     const launchConfig = this.getBrowserLaunchConfig();
 
                     if (launchConfig.shouldCleanLocks) {
                         this.cleanLocksAndJournals(launchConfig.userDataDir);
                     }
 
-                    try {
-                        this.context = await chromium.launchPersistentContext(launchConfig.userDataDir, {
+                    console.log('[BM] Đang gọi chromium.launchPersistentContext...');
+                    // Thêm timeout bao quanh chính việc launch để không bị treo vĩnh viễn
+                    this.context = await Promise.race([
+                        chromium.launchPersistentContext(launchConfig.userDataDir, {
                             executablePath: launchConfig.executablePath,
                             headless: false,
                             viewport: { width: 1280, height: 720 },
                             args: launchConfig.args,
-                            timeout: 60000
-                        });
-                    } catch (error) {
-                        throw error;
-                    }
+                            timeout: 45000
+                        }),
+                        new Promise((_, reject) => setTimeout(() => reject(new Error('LAUNCH_TIMEOUT')), 50000))
+                    ]);
+                    console.log('[BM] Khởi chạy Cốc Cốc THÀNH CÔNG.');
 
                     this.context.on('close', () => {
+                        console.log('[BM] Context trình duyệt đã đóng.');
                         this.context = null;
                         this.initializing = null;
                     });
 
                     return this.context;
                 } catch (error) {
+                    console.error(`[BM] Lỗi khi khởi chạy trình duyệt: ${error.message}`);
                     this.context = null;
                     this.initializing = null;
                     throw error;

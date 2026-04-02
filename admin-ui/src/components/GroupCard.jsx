@@ -1,7 +1,7 @@
 import React from 'react';
 import { Icon } from './Icon';
 
-const GroupCard = ({ group, isSelected, onToggle, isSuccess }) => {
+const GroupCard = ({ group, isSelected, onToggle, isSuccess, onDelete }) => {
   const isRecent = group.isSelectable === false;
 
   const getStatusColor = () => {
@@ -44,16 +44,27 @@ const GroupCard = ({ group, isSelected, onToggle, isSuccess }) => {
               {group.name || group.url}
               {isRecent && <span className="badge badge-error badge-outline text-[8px] h-4 py-0 px-1 font-black uppercase">CHỜ 48H</span>}
             </h3>
-            <a 
-              href={group.url} 
-              target="_blank" 
-              rel="noreferrer" 
-              onClick={(e) => e.stopPropagation()}
-              className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-primary-400 transition-all"
-              title="Open on Facebook"
-            >
-              <Icon.Globe />
-            </a>
+            <div className="flex items-center gap-1">
+              <a 
+                href={group.url} 
+                target="_blank" 
+                rel="noreferrer" 
+                onClick={(e) => e.stopPropagation()}
+                className="p-1.5 rounded-lg bg-white/5 hover:bg-white/10 text-slate-500 hover:text-primary-400 transition-all"
+                title="Open on Facebook"
+              >
+                <Icon.Globe />
+              </a>
+              {!isRecent && (
+                <button 
+                  onClick={(e) => { e.stopPropagation(); onDelete && onDelete(); }}
+                  className="p-1.5 rounded-lg bg-white/5 hover:bg-error/20 text-slate-500 hover:text-error transition-all"
+                  title="Xóa nhóm"
+                >
+                  <Icon.Trash />
+                </button>
+              )}
+            </div>
           </div>
 
           <div className="flex flex-wrap items-center gap-x-4 gap-y-1">

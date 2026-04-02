@@ -116,7 +116,22 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                 message: `[Main] Chuẩn bị đăng vào ${groupUrl} | ảnh: ${imagePaths.length} | thư mục ảnh: ${mediaDir}`,
                 groupUrl
             });
-            const result = await automator.postToGroup(groupUrl, finalContent, imagePaths);
+            const POST_TIMEOUT_MS = 180000; // 3 phút tối đa cho 1 nhóm
+            let result;
+            try {
+                result = await Promise.race([
+                    automator.postToGroup(groupUrl, finalContent, imagePaths),
+                    new Promise((_, reject) => setTimeout(() => reject(new Error('POST_TIMEOUT')), POST_TIMEOUT_MS))
+                ]);
+            } catch (err) {
+                if (err.message === 'POST_TIMEOUT') {
+                    result = { success: false, pending: false, reason: 'quá thời gian (3 phút)' };
+                    logCallback({ type: 'error', message: `⚠️ CẢNH BÁO: Nhóm ${groupUrl} xử lý quá lâu (hơn 3 phút). Đã bỏ qua.`, groupUrl });
+                } else {
+                    throw err;
+                }
+            }
+
             logCallback({
                 type: 'info',
                 message: `[Main] Kết quả postToGroup: ${JSON.stringify(result || null)}`,

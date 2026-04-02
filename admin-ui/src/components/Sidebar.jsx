@@ -9,7 +9,8 @@ const Sidebar = ({
   isScanning, triggerFetchMyGroups, stopScanning,
   isDiscovering, triggerDiscoverGroups, stopDiscovering,
   isHarvestingVisible, startVisibleHarvest, stopVisibleHarvest,
-  handleJoinGroup
+  handleJoinGroup,
+  handleDeleteGroup, handleDeleteAllGroups
 }) => {
   const [searchMyGroups, setSearchMyGroups] = useState('');
   const [searchDiscovery, setSearchDiscovery] = useState('');
@@ -168,9 +169,14 @@ const Sidebar = ({
 
                 <div className="flex justify-between items-center mb-1">
                   <span className="text-[10px] font-bold text-slate-500 uppercase tracking-tighter">Đã chọn: {selectedGroups.size} / {filteredMyGroups.length}</span>
-                  <button onClick={toggleAll} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 uppercase tracking-tighter">
-                    {selectedGroups.size === filteredMyGroups.length && filteredMyGroups.length > 0 ? 'Bỏ chọn hết' : 'Chọn tất cả'}
-                  </button>
+                  <div className="flex gap-3">
+                    <button onClick={handleDeleteAllGroups} className="text-[10px] font-bold text-error hover:text-error/80 uppercase tracking-tighter">
+                      Xóa tất cả
+                    </button>
+                    <button onClick={toggleAll} className="text-[10px] font-bold text-primary-500 hover:text-primary-400 uppercase tracking-tighter">
+                      {selectedGroups.size === filteredMyGroups.length && filteredMyGroups.length > 0 ? 'Bỏ chọn hết' : 'Chọn tất cả'}
+                    </button>
+                  </div>
                 </div>
                {filteredMyGroups.length === 0 ? (
                  <div className="text-center py-10 text-slate-500 text-xs italic">Không tìm thấy nhóm nào.</div>
@@ -180,6 +186,7 @@ const Sidebar = ({
                     group={g} 
                     isSelected={selectedGroups.has(g.url)} 
                     onToggle={toggleSelect} 
+                    onDelete={() => handleDeleteGroup(g.url)}
                  />
                ))}
              </>

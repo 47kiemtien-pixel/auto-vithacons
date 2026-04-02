@@ -5,7 +5,10 @@ const genAI = new GoogleGenerativeAI(process.env.GEMINI_API_KEY);
 
 async function paraphrase(content) {
     try {
-        const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+        // Sử dụng gemini-2.0-flash vì đã kiểm tra và thấy có trong danh sách hỗ trợ của key này
+        const modelId = "gemini-2.0-flash";
+        const model = genAI.getGenerativeModel({ model: modelId });
+        console.log(`[Paraphraser] Đang gọi model: ${modelId}`);
         
         const prompt = `NHIỆM VỤ: Chỉ điều chỉnh tối thiểu nội dung sau (thay đổi tối đa 1-3 từ đồng nghĩa đơn giản) và THÊM 3-5 hashtag liên quan ở cuối bài.
         
@@ -25,10 +28,7 @@ async function paraphrase(content) {
         const response = await result.response;
         return response.text().trim();
     } catch (error) {
-        if (error.status === 429 || error.message.includes('429')) {
-            throw new Error("QUOTA_EXCEEDED");
-        }
-        console.error("Lỗi khi paraphrase:", error);
+        console.error("Lỗi khi paraphrase FULL ERROR:", error);
         return content;
     }
 }
