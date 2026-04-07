@@ -49,3 +49,8 @@ admin-ui/node_modules/
 fb_user_data/
 fb_coccoc_profile/
 .npm-cache/
+
+# Tools and Temp
+tools/
+tmp_*.js
+test_results_*.txt
