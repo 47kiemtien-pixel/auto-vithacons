@@ -535,7 +535,7 @@ class FBAutomator {
             return null;
         }
     }
-    async postToGroup(groupUrl, content, imagePaths = []) {
+    async postToGroup(groupUrl, content, mediaPaths = [], mediaType = 'image') {
         try {
             this.log(`[FB] Đang truy cập nhóm: ${groupUrl}`);
             await this.page.goto(groupUrl);
@@ -618,8 +618,9 @@ class FBAutomator {
             await sleep(1200);
 
             // Tải ảnh lên nếu có
-            if (imagePaths.length > 0) {
-                this.log(`[FB] Đang tải lên ${imagePaths.length} ảnh...`);
+            if (mediaPaths.length > 0) {
+                const mediaLabel = mediaType === 'video' ? 'video' : 'ảnh';
+                this.log(`[FB] Đang tải lên ${mediaPaths.length} ${mediaLabel}...`);
 
                 const dialog = this.page.locator('div[role="dialog"]').last();
                 let uploadConfirmed = false;
@@ -643,7 +644,7 @@ class FBAutomator {
                         if (meta) metas.push(meta);
                     }
 
-                    return metas.filter((meta) => !meta.disabled && (!meta.accept || /image|png|jpg|jpeg|webp/i.test(meta.accept)));
+                    return metas.filter((meta) => !meta.disabled && (!meta.accept || /image|png|jpg|jpeg|webp|video|mp4|mov|avi|mkv|webm/i.test(meta.accept)));
                 };
 
                 const tryAttachViaInputAncestorClick = async () => {
@@ -674,7 +675,7 @@ class FBAutomator {
                             ]).then(([chooser]) => chooser);
 
                             if (directChooser) {
-                                await directChooser.setFiles(imagePaths);
+                                await directChooser.setFiles(mediaPaths);
                                 attachedByInput = true;
                                 this.log(`[FB] Đã nạp ảnh qua filechooser trực tiếp từ input #${meta.index + 1}.`);
                                 return true;
@@ -716,7 +717,7 @@ class FBAutomator {
                                 continue;
                             }
 
-                            await fileChooser.setFiles(imagePaths);
+                            await fileChooser.setFiles(mediaPaths);
                             attachedByInput = true;
                             this.log(`[FB] Đã nạp ảnh qua filechooser từ ancestor input #${meta.index + 1}.`);
                             return true;
@@ -752,15 +753,15 @@ class FBAutomator {
                                 this.log(`[FB] Bỏ qua input file #${i + 1} vì đang bị disabled.`);
                                 continue;
                             }
-                            if (meta.accept && !/image|png|jpg|jpeg|webp/i.test(meta.accept)) {
-                                this.log(`[FB] Bỏ qua input file #${i + 1} vì accept không phải ảnh: ${meta.accept}`);
+                            if (meta.accept && !/image|png|jpg|jpeg|webp|video|mp4|mov|avi|mkv|webm/i.test(meta.accept)) {
+                                this.log(`[FB] Bỏ qua input file #${i + 1} vì accept không khớp media: ${meta.accept}`);
                                 continue;
                             }
 
                             triedCount++;
                             this.log(`[FB] Thử input file #${i + 1} | inDialog=${meta.inDialog} | multiple=${meta.multiple} | hidden=${meta.hiddenByStyle} | accept=${meta.accept || 'n/a'}`);
 
-                            await input.setInputFiles(meta.multiple ? imagePaths : [imagePaths[0]], { timeout: 5000 });
+                            await input.setInputFiles(meta.multiple ? mediaPaths : [mediaPaths[0]], { timeout: 5000 });
                             await input.evaluate((el) => {
                                 el.dispatchEvent(new Event('input', { bubbles: true }));
                                 el.dispatchEvent(new Event('change', { bubbles: true }));
@@ -861,7 +862,7 @@ class FBAutomator {
                 if (photoButtonClicked) {
                     const fileChooser = await fileChooserPromise;
                     if (fileChooser) {
-                        await fileChooser.setFiles(imagePaths);
+                        await fileChooser.setFiles(mediaPaths);
                         attachedByInput = true;
                         this.log('[FB] Đã nạp ảnh qua sự kiện filechooser.');
                     } else {
@@ -889,23 +890,28 @@ class FBAutomator {
                         'div[aria-label="Xóa ảnh"]',
                         'div[aria-label="Xoa anh"]',
                         'div[aria-label="Remove photo"]',
+                        'div[aria-label="Xóa video"]',
+                        'div[aria-label="Remove video"]',
                         'div[aria-label="Chỉnh sửa ảnh"]',
                         'div[aria-label="Edit photo"]',
                         '[data-pagelet*="MediaAttachment"] img',
+                        '[data-pagelet*="MediaAttachment"] video',
                         'img[src^="blob:"]',
                         'img[src^="data:image"]',
+                        'video[src^="blob:"]',
                         '[aria-label*="photo"] img',
-                        '[aria-label*="ảnh"] img'
+                        '[aria-label*="ảnh"] img',
+                        '[aria-label*="video"] video'
                     ];
                     const hasAttachmentPreview = selectors.some((selector) => dialog.querySelector(selector));
                     return hasAttachedFile || hasAttachmentPreview;
                 }, { timeout: 6000 }).then(() => true).catch(() => false);
-                this.log(`[FB] Kết quả xác nhận upload ảnh: ${uploadConfirmed ? 'OK' : 'KHÔNG THẤY ATTACHMENT'} | attachedByInput=${attachedByInput}`);
+                this.log(`[FB] Kết quả xác nhận upload ${mediaType === 'video' ? 'video' : 'ảnh'}: ${uploadConfirmed ? 'OK' : 'KHÔNG THẤY ATTACHMENT'} | attachedByInput=${attachedByInput}`);
                 await sleep(700);
 
                 if (!uploadConfirmed) {
-                    this.log('[FB] Upload ảnh chưa thành công trong composer. Dừng đăng bài để tránh bài không kèm hình.');
-                    return { success: false, pending: false, reason: 'image_upload_failed' };
+                    this.log(`[FB] Upload ${mediaType === 'video' ? 'video' : 'ảnh'} chưa thành công trong composer. Dừng đăng bài để tránh bài không kèm media.`);
+                    return { success: false, pending: false, reason: 'media_upload_failed' };
                 }
             }
 

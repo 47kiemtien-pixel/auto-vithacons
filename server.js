@@ -578,7 +578,8 @@ app.post('/api/delete-all-groups', (req, res) => {
 
 app.post('/api/post', async (req, res) => {
     if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
-    const { groups, postContent, imageFolderPath, pageId } = req.body;
+    const { groups, postContent, mediaType, imageFolderPath, videoFolderPath, pageId } = req.body;
+    const normalizedMediaType = mediaType === 'video' ? 'video' : 'image';
     if (!groups?.length) return res.status(400).json({ error: 'Thiếu danh sách nhóm.' });
     isPosting = true;
     res.json({ success: true, message: 'Bắt đầu đăng bài.' });
@@ -598,7 +599,7 @@ app.post('/api/post', async (req, res) => {
         await startPosting(groups, (event) => {
             broadcastLog({ ...event, source: 'posting' });
             if (event.type === 'success' && event.groupUrl) markGroupAfterSuccess(event.groupUrl, event.status, pageId);
-        }, context, postContent, imageFolderPath, settings.delayBetweenPostsMinutes);
+        }, context, postContent, normalizedMediaType, imageFolderPath, videoFolderPath, settings.delayBetweenPostsMinutes);
     } catch (e) {
         broadcastLog({ type: 'error', message: `Lỗi: ${e.message}`, source: 'posting' });
     } finally {

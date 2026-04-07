@@ -3,7 +3,9 @@ import { Icon } from './Icon';
 
 const PostConfig = ({
   postContent, setPostContent,
+  mediaType, setMediaType,
   imageFolderPath, setImageFolderPath,
+  videoFolderPath, setVideoFolderPath,
   manualActorId, setManualActorId,
   delayBetweenPostsMinutes, setDelayBetweenPostsMinutes,
   autoDiscoveryEnabled, setAutoDiscoveryEnabled,
@@ -38,13 +40,37 @@ const PostConfig = ({
             </div>
             <div className="space-y-2">
               <label className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
-                <Icon.Group /> THU MUC ANH
+                <Icon.Settings /> LOAI MEDIA
+              </label>
+              <div className="grid grid-cols-2 gap-2">
+                <button
+                  type="button"
+                  onClick={() => setMediaType?.('image')}
+                  className={`btn btn-sm rounded-2xl ${mediaType === 'image' ? 'btn-primary' : 'btn-outline'}`}
+                >
+                  Dang anh
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setMediaType?.('video')}
+                  className={`btn btn-sm rounded-2xl ${mediaType === 'video' ? 'btn-primary' : 'btn-outline'}`}
+                >
+                  Dang video
+                </button>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <label className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
+                <Icon.Group /> {mediaType === 'video' ? 'THU MUC VIDEO' : 'THU MUC ANH'}
               </label>
               <input
                 type="text"
-                value={imageFolderPath}
-                onChange={(e) => setImageFolderPath(e.target.value)}
-                placeholder="Vi du: C:\\HinhAnh"
+                value={mediaType === 'video' ? (videoFolderPath || '') : (imageFolderPath || '')}
+                onChange={(e) => {
+                  if (mediaType === 'video') setVideoFolderPath?.(e.target.value);
+                  else setImageFolderPath?.(e.target.value);
+                }}
+                placeholder={mediaType === 'video' ? 'Vi du: C:\\VideoDang' : 'Vi du: C:\\HinhAnh'}
                 className="input input-bordered w-full rounded-2xl bg-base-200 focus:bg-base-100 transition-all font-medium text-xs"
               />
             </div>

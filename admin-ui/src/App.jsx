@@ -31,7 +31,9 @@ function App() {
   const [successGroups, setSuccessGroups] = useState([]);
   const [activeTab, setActiveTab] = useState('my-groups');
   const [postContent, setPostContent] = useState('');
+  const [mediaType, setMediaType] = useState('image');
   const [imageFolderPath, setImageFolderPath] = useState('');
+  const [videoFolderPath, setVideoFolderPath] = useState('');
   const [delayBetweenPostsMinutes, setDelayBetweenPostsMinutes] = useState('1');
   const [autoDiscoveryEnabled, setAutoDiscoveryEnabled] = useState(false);
   const [autoDiscoveryIntervalHours, setAutoDiscoveryIntervalHours] = useState('6');
@@ -272,14 +274,21 @@ function App() {
     if (selectedGroups.size === 0 || !selectedPageId) return;
     const groupList = groups.filter(g => selectedGroups.has(g.url));
     setIsPosting(true);
-    try {
-      await fetch(`${API_BASE}/post`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ groups: groupList, postContent, imageFolderPath, pageId: selectedPageId })
-      });
-    } catch (error) { setIsPosting(false); }
-  };
+      try {
+        await fetch(`${API_BASE}/post`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            groups: groupList,
+            postContent,
+            mediaType,
+            imageFolderPath,
+            videoFolderPath,
+            pageId: selectedPageId
+          })
+        });
+      } catch (error) { setIsPosting(false); }
+    };
 
 
   const handleDeleteGroup = async (url) => {
@@ -455,8 +464,12 @@ function App() {
                <PostConfig 
                   postContent={postContent}
                   setPostContent={setPostContent}
+                  mediaType={mediaType}
+                  setMediaType={setMediaType}
                   imageFolderPath={imageFolderPath}
                   setImageFolderPath={setImageFolderPath}
+                  videoFolderPath={videoFolderPath}
+                  setVideoFolderPath={setVideoFolderPath}
                   delayBetweenPostsMinutes={delayBetweenPostsMinutes}
                   setDelayBetweenPostsMinutes={setDelayBetweenPostsMinutes}
                   autoDiscoveryEnabled={autoDiscoveryEnabled}
@@ -490,6 +503,12 @@ function App() {
           <div className="xl:col-span-1 h-full min-h-0 flex flex-col gap-6">
             <div className="flex-1 min-h-0 flex flex-col gap-6">
                <PostConfig 
+                  mediaType={mediaType}
+                  setMediaType={setMediaType}
+                  imageFolderPath={imageFolderPath}
+                  setImageFolderPath={setImageFolderPath}
+                  videoFolderPath={videoFolderPath}
+                  setVideoFolderPath={setVideoFolderPath}
                   delayBetweenPostsMinutes={delayBetweenPostsMinutes}
                   setDelayBetweenPostsMinutes={setDelayBetweenPostsMinutes}
                   autoDiscoveryEnabled={autoDiscoveryEnabled}

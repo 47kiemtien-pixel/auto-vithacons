@@ -5,19 +5,67 @@ const { sleep } = require('./scheduler');
 
 const PARAPHRASE_TIMEOUT_MS = 5000;
 const QUICK_POST_VERIFY_DELAY_MS = 10000;
-async function startPosting(targetGroups, logCallback = () => {}, browserContext = null, postContent = '', imageFolderPath = '', delayBetweenPostsMinutes = 1) {
+
+function loadMediaPaths(mediaType, imageFolderPath = '', videoFolderPath = '') {
     const fs = require('fs');
     const path = require('path');
-    let consecutiveImageUploadFailures = 0;
-    
-    // Đọc danh sách nhóm cấm link
+    const os = require('os');
+
+    const normalizedMediaType = mediaType === 'video' ? 'video' : 'image';
+    const mediaDir = normalizedMediaType === 'video'
+        ? (videoFolderPath ? videoFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Mau video 2026'))
+        : (imageFolderPath ? imageFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Mau nha 2026'));
+
+    const matcher = normalizedMediaType === 'video'
+        ? /\.(mp4|mov|avi|mkv|webm)$/i
+        : /\.(jpg|jpeg|png|webp)$/i;
+
+    if (!fs.existsSync(mediaDir)) {
+        return {
+            normalizedMediaType,
+            mediaDir,
+            mediaPaths: [],
+            exists: false
+        };
+    }
+
+    const mediaPaths = fs.readdirSync(mediaDir)
+        .filter((file) => matcher.test(file))
+        .map((file) => path.join(mediaDir, file));
+
+    return {
+        normalizedMediaType,
+        mediaDir,
+        mediaPaths,
+        exists: true
+    };
+}
+
+async function startPosting(
+    targetGroups,
+    logCallback = () => {},
+    browserContext = null,
+    postContent = '',
+    mediaType = 'image',
+    imageFolderPath = '',
+    videoFolderPath = '',
+    delayBetweenPostsMinutes = 1
+) {
+    const fs = require('fs');
+    const path = require('path');
+    let consecutiveMediaUploadFailures = 0;
+
     const antiLinkPath = path.join(__dirname, 'anti_link_groups.txt');
     let antiLinkGroups = new Set();
     if (fs.existsSync(antiLinkPath)) {
-        antiLinkGroups = new Set(fs.readFileSync(antiLinkPath, 'utf-8').split('\n').map(l => l.trim()).filter(l => l));
+        antiLinkGroups = new Set(
+            fs.readFileSync(antiLinkPath, 'utf-8')
+                .split('\n')
+                .map((line) => line.trim())
+                .filter(Boolean)
+        );
     }
 
-    // Xác định nội dung bài viết
     let baseContent = postContent ? postContent.trim() : '';
     if (!baseContent) {
         const contentPath = path.join(__dirname, 'content.txt');
@@ -27,7 +75,7 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
     }
 
     if (!targetGroups || targetGroups.length === 0 || !baseContent) {
-        const err = "Lỗi: Không có danh sách nhóm hoặc nội dung bài viết trống.";
+        const err = 'Loi: Khong co danh sach nhom hoac noi dung bai viet trong.';
         console.error(err);
         logCallback({ type: 'error', message: err });
         return;
@@ -36,49 +84,42 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
     const automator = new FBAutomator((message) => {
         logCallback({ type: 'info', message });
     });
-    
+
     try {
-        logCallback({ type: 'info', message: 'Khởi tạo trình duyệt...' });
+        logCallback({ type: 'info', message: 'Khoi tao trinh duyet...' });
         await automator.init(browserContext);
-        logCallback({ type: 'info', message: 'Kiểm tra đăng nhập...' });
+        logCallback({ type: 'info', message: 'Kiem tra dang nhap...' });
         await automator.login();
 
-        // Xác định thư mục hình ảnh
-        const os = require('os');
-        const mediaDir = imageFolderPath ? imageFolderPath.trim() : path.join(os.homedir(), 'Desktop', 'Mẫu nhà 2026');
-        
-        let imagePaths = [];
-        if (fs.existsSync(mediaDir)) {
-            imagePaths = fs.readdirSync(mediaDir)
-                .filter(file => /\.(jpg|jpeg|png|webp)$/i.test(file))
-                .map(file => path.join(mediaDir, file));
-            const msg = `[Main] Đã tìm thấy ${imagePaths.length} ảnh trong thư mục ${mediaDir}`;
+        const mediaInfo = loadMediaPaths(mediaType, imageFolderPath, videoFolderPath);
+        const mediaLabel = mediaInfo.normalizedMediaType === 'video' ? 'video' : 'anh';
+
+        if (mediaInfo.exists) {
+            const msg = `[Main] Da tim thay ${mediaInfo.mediaPaths.length} ${mediaLabel} trong thu muc ${mediaInfo.mediaDir}`;
             console.log(msg);
             logCallback({ type: 'info', message: msg });
-            if (imagePaths.length === 0) {
-                logCallback({ type: 'warning', message: `[Main] Thư mục ảnh có tồn tại nhưng không có file .jpg/.jpeg/.png/.webp nào: ${mediaDir}` });
+            if (mediaInfo.mediaPaths.length === 0) {
+                logCallback({
+                    type: 'warning',
+                    message: `[Main] Thu muc ${mediaLabel} co ton tai nhung khong co file hop le: ${mediaInfo.mediaDir}`
+                });
             }
         } else {
-            const msg = `[Main] Không tìm thấy thư mục ảnh: ${mediaDir}`;
+            const msg = `[Main] Khong tim thay thu muc ${mediaLabel}: ${mediaInfo.mediaDir}`;
             console.log(msg);
             logCallback({ type: 'warning', message: msg });
         }
 
         for (let i = 0; i < targetGroups.length; i++) {
-            let groupObj = targetGroups[i];
-            let groupUrl = typeof groupObj === 'string' ? groupObj.trim() : groupObj.url.trim();
+            const groupObj = targetGroups[i];
+            const groupUrl = typeof groupObj === 'string' ? groupObj.trim() : groupObj.url.trim();
 
-            const headerMsg = `\n--- [Đang xử lý ${i + 1}/${targetGroups.length}] ---`;
-            console.log(headerMsg);
-            logCallback({ type: 'progress', message: `Đang xử lý ${i + 1}/${targetGroups.length}: ${groupUrl}`, groupUrl });
-            
-            // Xử lý nội dung (paraphrase nếu được chọn)
-            console.log(`[Main] Đang chuẩn bị nội dung cho nhóm: ${groupUrl}`);
+            console.log(`\n--- [Dang xu ly ${i + 1}/${targetGroups.length}] ---`);
+            logCallback({ type: 'progress', message: `Dang xu ly ${i + 1}/${targetGroups.length}: ${groupUrl}`, groupUrl });
+
             let finalContent = baseContent;
-            
-            // KIỂM TRA NẾU NHÓM CẤM LINK -> XOÁ LINK KHỎI NỘI DUNG
             if (antiLinkGroups.has(groupUrl)) {
-                logCallback({ type: 'warning', message: `⚠️ Nhóm này CẤM LINK. Đang tự động loại bỏ các liên kết...`, groupUrl });
+                logCallback({ type: 'warning', message: 'Nhom nay cam link. Dang tu dong loai bo lien ket...', groupUrl });
                 const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
                 finalContent = finalContent.replace(urlRegex, '');
             }
@@ -88,45 +129,36 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
                     paraphrase(finalContent),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('PARAPHRASE_TIMEOUT')), PARAPHRASE_TIMEOUT_MS))
                 ]);
-                if (rewritten && rewritten.trim() !== "") {
+                if (rewritten && rewritten.trim() !== '') {
                     finalContent = rewritten;
-                    console.log(`[Main] Nội dung đã rewrite:\n"${finalContent}"`);
-                    logCallback({ type: 'info', message: '✨ Đã paraphrase nội dung để tránh spam.', groupUrl });
-                } else {
-                    console.log('[Main] Rewrite rỗng, dùng nội dung gốc.');
+                    logCallback({ type: 'info', message: 'Da paraphrase noi dung de tranh spam.', groupUrl });
                 }
             } catch (err) {
-                if (err.message === "QUOTA_EXCEEDED") {
-                    const quotaMsg = '⚠️ CẢNH BÁO: API Gemini đã hết hạn mức (Quota Exceeded). Bốt sẽ dùng nội dung gốc để đăng tiếp.';
-                    console.log(`[Main] ${quotaMsg}`);
-                    logCallback({ type: 'warning', message: quotaMsg, groupUrl });
+                if (err.message === 'QUOTA_EXCEEDED') {
+                    logCallback({ type: 'warning', message: 'API Gemini da het han muc. Bot se dung noi dung goc.', groupUrl });
                 } else if (err.message === 'PARAPHRASE_TIMEOUT') {
-                    const timeoutMsg = 'Paraphrase quá chậm, bỏ qua để đăng nhanh hơn.';
-                    console.log(`[Main] ${timeoutMsg}`);
-                    logCallback({ type: 'warning', message: timeoutMsg, groupUrl });
-                } else {
-                    console.log(`[Main] Dùng nội dung gốc thay thế do paraphrase lỗi: ${err.message}`);
+                    logCallback({ type: 'warning', message: 'Paraphrase qua cham, bo qua de dang nhanh hon.', groupUrl });
                 }
             }
 
-            // Tiến hành đăng bài
-            logCallback({ type: 'status', message: `Tiến hành lấy nút đăng bài...`, groupUrl });
+            logCallback({ type: 'status', message: 'Tien hanh lay nut dang bai...', groupUrl });
             logCallback({
                 type: 'info',
-                message: `[Main] Chuẩn bị đăng vào ${groupUrl} | ảnh: ${imagePaths.length} | thư mục ảnh: ${mediaDir}`,
+                message: `[Main] Chuan bi dang vao ${groupUrl} | mediaType: ${mediaInfo.normalizedMediaType} | files: ${mediaInfo.mediaPaths.length} | thu muc: ${mediaInfo.mediaDir}`,
                 groupUrl
             });
-            const POST_TIMEOUT_MS = 180000; // 3 phút tối đa cho 1 nhóm
+
+            const POST_TIMEOUT_MS = 180000;
             let result;
             try {
                 result = await Promise.race([
-                    automator.postToGroup(groupUrl, finalContent, imagePaths),
+                    automator.postToGroup(groupUrl, finalContent, mediaInfo.mediaPaths, mediaInfo.normalizedMediaType),
                     new Promise((_, reject) => setTimeout(() => reject(new Error('POST_TIMEOUT')), POST_TIMEOUT_MS))
                 ]);
             } catch (err) {
                 if (err.message === 'POST_TIMEOUT') {
-                    result = { success: false, pending: false, reason: 'quá thời gian (3 phút)' };
-                    logCallback({ type: 'error', message: `⚠️ CẢNH BÁO: Nhóm ${groupUrl} xử lý quá lâu (hơn 3 phút). Đã bỏ qua.`, groupUrl });
+                    result = { success: false, pending: false, reason: 'post_timeout' };
+                    logCallback({ type: 'error', message: `Nhom ${groupUrl} xu ly qua lau (hon 3 phut). Da bo qua.`, groupUrl });
                 } else {
                     throw err;
                 }
@@ -134,30 +166,23 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
 
             logCallback({
                 type: 'info',
-                message: `[Main] Kết quả postToGroup: ${JSON.stringify(result || null)}`,
+                message: `[Main] Ket qua postToGroup: ${JSON.stringify(result || null)}`,
                 groupUrl
             });
-            
+
             if (result && result.success) {
-                consecutiveImageUploadFailures = 0;
-                
+                consecutiveMediaUploadFailures = 0;
+
                 if (result.pending) {
-                    const msg = `[Main] Đăng xong, chờ Facebook phê duyệt. Đã ghi vào lịch sử.`;
-                    console.log(msg);
-                    logCallback({ type: 'success', message: msg, groupUrl, status: 'pending' });
+                    logCallback({ type: 'success', message: 'Dang xong, cho Facebook phe duyet. Da ghi vao lich su.', groupUrl, status: 'pending' });
                 } else {
-                    const msg = `[Main] Đăng thành công! Đang đợi 3 giây để kiểm tra nhanh trạng thái bài...`;
-                    console.log(msg);
-                    logCallback({ type: 'info', message: msg, groupUrl });
-                    
+                    logCallback({ type: 'info', message: 'Dang thanh cong. Dang doi kiem tra nhanh trang thai bai...', groupUrl });
                     await sleep(QUICK_POST_VERIFY_DELAY_MS);
-                    
+
                     const removedStatus = await automator.checkRemovedContent(groupUrl);
                     if (removedStatus === 'removed_by_link' || removedStatus === 'removed_other') {
-                        const reason = removedStatus === 'removed_by_link' ? 'do CHỨA LINK' : 'nghi ngờ vi phạm/spam';
-                        const failMsg = `⚠️ PHÁT HIỆN: Bài viết vừa đăng đã bị gỡ thầm lặng (${reason}). Không ghi vào lịch sử.`;
-                        console.log(failMsg);
-                        logCallback({ type: 'error', message: failMsg, groupUrl });
+                        const reason = removedStatus === 'removed_by_link' ? 'do chua link' : 'nghi ngo vi pham/spam';
+                        logCallback({ type: 'error', message: `Phat hien bai vua dang da bi go tham lang (${reason}). Khong ghi vao lich su.`, groupUrl });
 
                         if (!antiLinkGroups.has(groupUrl)) {
                             fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
@@ -166,106 +191,92 @@ async function startPosting(targetGroups, logCallback = () => {}, browserContext
 
                         const urlRegex = /(https?:\/\/[^\s]+|www\.[^\s]+|[a-zA-Z0-9.-]+\.(com|vn|net|org|info|edu|gov)([^\s]*))/gi;
                         const contentNoLink = finalContent.replace(urlRegex, '');
-                        
-                        const retryResult = await automator.postToGroup(groupUrl, contentNoLink, imagePaths);
+                        const retryResult = await automator.postToGroup(groupUrl, contentNoLink, mediaInfo.mediaPaths, mediaInfo.normalizedMediaType);
                         if (retryResult && retryResult.success) {
-                            logCallback({ type: 'success', message: '✅ ĐÃ ĐĂNG LẠI THÀNH CÔNG (Không kèm link).', groupUrl, status: 'published' });
+                            logCallback({ type: 'success', message: 'Da dang lai thanh cong (khong kem link).', groupUrl, status: 'published' });
                         } else {
-                            logCallback({ type: 'error', message: '❌ Thất bại khi cố gắng đăng lại.', groupUrl });
+                            logCallback({ type: 'error', message: 'That bai khi co gang dang lai.', groupUrl });
                         }
                     } else {
-                        logCallback({ type: 'success', message: '✅ Bài viết vẫn ổn định (Không bị gỡ).', groupUrl, status: 'published' });
+                        logCallback({ type: 'success', message: 'Bai viet van on dinh (khong bi go).', groupUrl, status: 'published' });
                     }
                 }
-                
+
                 if (i < targetGroups.length - 1) {
                     const safeDelayMinutes = Math.max(0, Number(delayBetweenPostsMinutes) || 0);
-                    const chosenDelayMinutes = safeDelayMinutes > 0
-                        ? Math.floor(Math.random() * safeDelayMinutes) + 1
-                        : 0;
+                    const chosenDelayMinutes = safeDelayMinutes > 0 ? Math.floor(Math.random() * safeDelayMinutes) + 1 : 0;
                     const delayMs = chosenDelayMinutes * 60 * 1000;
-                    const msg = `[Scheduler] Đợi ngẫu nhiên ${chosenDelayMinutes} phút trước khi đăng bài tiếp theo...`;
-                    console.log(msg);
-                    logCallback({ type: 'delay', message: msg, groupUrl });
+                    logCallback({ type: 'delay', message: `[Scheduler] Doi ngau nhien ${chosenDelayMinutes} phut truoc khi dang bai tiep theo...`, groupUrl });
                     if (delayMs > 0) {
                         await sleep(delayMs);
                     }
                 }
             } else {
                 if (result && result.reason === 'rejected_link') {
-                    const msg = '❌ BỊ TỪ CHỐI: Nhóm này không cho phép đăng Link. Đã lưu vào danh sách hạn chế.';
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'rejected_link' });
-                    
+                    logCallback({ type: 'error', message: 'Bi tu choi: nhom nay khong cho phep dang link.', groupUrl, status: 'rejected_link' });
                     if (!antiLinkGroups.has(groupUrl)) {
                         fs.appendFileSync(antiLinkPath, `${groupUrl}\n`);
                         antiLinkGroups.add(groupUrl);
                     }
-                } else if (result && result.reason === 'image_upload_failed') {
-                    consecutiveImageUploadFailures += 1;
-                    const msg = '❌ Upload ảnh chưa thành công. Bot đã dừng trước khi bấm Đăng để tránh bài chỉ có nội dung.';
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'image_upload_failed' });
-                    if (consecutiveImageUploadFailures >= 3) {
-                        const stopMsg = 'Dừng batch đăng bài vì upload ảnh thất bại liên tiếp 3 nhóm. Khả năng cao là luồng upload đang lỗi toàn cục.';
-                        console.log(`[Main] ${stopMsg}`);
-                        logCallback({ type: 'error', message: `[Main] ${stopMsg}`, groupUrl, status: 'stopped_after_repeated_image_failures' });
+                } else if (result && result.reason === 'media_upload_failed') {
+                    consecutiveMediaUploadFailures += 1;
+                    const msg = mediaInfo.normalizedMediaType === 'video'
+                        ? 'Upload video chua thanh cong. Bot da dung truoc khi bam Dang de tranh bai chi co noi dung.'
+                        : 'Upload anh chua thanh cong. Bot da dung truoc khi bam Dang de tranh bai chi co noi dung.';
+                    logCallback({ type: 'error', message: msg, groupUrl, status: 'media_upload_failed' });
+                    if (consecutiveMediaUploadFailures >= 3) {
+                        logCallback({
+                            type: 'error',
+                            message: `[Main] Dung batch dang bai vi upload ${mediaInfo.normalizedMediaType === 'video' ? 'video' : 'anh'} that bai lien tiep 3 nhom.`,
+                            groupUrl,
+                            status: 'stopped_after_repeated_media_failures'
+                        });
                         break;
                     }
                 } else if (result && result.reason === 'composer_not_found') {
-                    consecutiveImageUploadFailures = 0;
-                    const msg = '❌ Không tìm thấy ô mở hộp soạn bài trong nhóm.';
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'composer_not_found' });
+                    consecutiveMediaUploadFailures = 0;
+                    logCallback({ type: 'error', message: 'Khong tim thay o mo hop soan bai trong nhom.', groupUrl, status: 'composer_not_found' });
                 } else if (result && result.reason === 'textbox_not_found') {
-                    consecutiveImageUploadFailures = 0;
-                    const msg = '❌ Đã mở hộp đăng nhưng không nhập được nội dung vào ô soạn bài.';
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'textbox_not_found' });
+                    consecutiveMediaUploadFailures = 0;
+                    logCallback({ type: 'error', message: 'Da mo hop dang nhung khong nhap duoc noi dung.', groupUrl, status: 'textbox_not_found' });
                 } else if (result && result.reason === 'submit_button_not_found') {
-                    consecutiveImageUploadFailures = 0;
-                    const msg = '❌ Không tìm thấy nút Đăng hoặc nút bị khóa quá lâu.';
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'submit_button_not_found' });
+                    consecutiveMediaUploadFailures = 0;
+                    logCallback({ type: 'error', message: 'Khong tim thay nut Dang hoac nut bi khoa qua lau.', groupUrl, status: 'submit_button_not_found' });
                 } else {
-                    consecutiveImageUploadFailures = 0;
-                    const msg = `[Main] Đăng bài thất bại. Lý do: ${result?.reason || 'unknown'}`;
-                    console.log(msg);
-                    logCallback({ type: 'error', message: msg, groupUrl, status: 'failed' });
+                    consecutiveMediaUploadFailures = 0;
+                    logCallback({ type: 'error', message: `[Main] Dang bai that bai. Ly do: ${result?.reason || 'unknown'}`, groupUrl, status: 'failed' });
                 }
             }
         }
-        
-        const doneMsg = '\n=== Đã hoàn thành tất cả bài đăng! ===';
-        console.log(doneMsg);
-        logCallback({ type: 'done', message: doneMsg });
 
+        logCallback({ type: 'done', message: '\n=== Da hoan thanh tat ca bai dang! ===' });
     } catch (error) {
-        console.error("Lỗi hệ thống:", error);
-        logCallback({ type: 'error', message: `Lỗi hệ thống: ${error.message}` });
-    } finally {
-        // await automator.close();
+        console.error('Loi he thong:', error);
+        logCallback({ type: 'error', message: `Loi he thong: ${error.message}` });
     }
 }
 
 async function main() {
     const fs = require('fs');
     const path = require('path');
-    let groups = (process.env.FB_GROUPS || "").split(',').map(g => g.trim()).filter(g => g !== "");
+    let groups = (process.env.FB_GROUPS || '').split(',').map((g) => g.trim()).filter(Boolean);
     const extractedPath = path.join(__dirname, 'extracted_groups.txt');
     if (fs.existsSync(extractedPath)) {
         const fileContent = fs.readFileSync(extractedPath, 'utf-8');
-        const fileGroups = fileContent.split('\n')
-            .map(line => line.replace(/,/g, '').trim())
-            .filter(line => line.length > 0 && line.startsWith('http'));
+        const fileGroups = fileContent
+            .split('\n')
+            .map((line) => line.replace(/,/g, '').trim())
+            .filter((line) => line.length > 0 && line.startsWith('http'));
         groups = [...new Set([...groups, ...fileGroups])];
     }
+
     const limit = parseInt(process.argv[2], 10);
-    if (!isNaN(limit) && limit > 0) {
+    if (!Number.isNaN(limit) && limit > 0) {
         groups = groups.slice(0, limit);
-        console.log(`[Main] Giới hạn chạy: Chỉ xử lý ${limit} nhóm đầu tiên.`);
+        console.log(`[Main] Gioi han chay: chi xu ly ${limit} nhom dau tien.`);
     }
-    await startPosting(groups, (evt) => {});
+
+    await startPosting(groups, () => {});
 }
 
 if (require.main === module) {
