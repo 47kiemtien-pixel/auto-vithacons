@@ -33,6 +33,11 @@ function App() {
   const [postContent, setPostContent] = useState('');
   const [imageFolderPath, setImageFolderPath] = useState('');
   const [delayBetweenPostsMinutes, setDelayBetweenPostsMinutes] = useState('1');
+  const [autoDiscoveryEnabled, setAutoDiscoveryEnabled] = useState(false);
+  const [autoDiscoveryIntervalHours, setAutoDiscoveryIntervalHours] = useState('6');
+  const [autoDiscoveryKeyword, setAutoDiscoveryKeyword] = useState('');
+  const [discoverJoinCooldownHours, setDiscoverJoinCooldownHours] = useState('24');
+  const [maxAutoJoinPerRun, setMaxAutoJoinPerRun] = useState('2');
   const [isSavingSettings, setIsSavingSettings] = useState(false);
   const [workerStatus, setWorkerStatus] = useState({ isRunning: false, pendingCount: 0, isScanning: false, isDiscovering: false });
   const [isWorkerActionLoading, setIsWorkerActionLoading] = useState(false);
@@ -102,6 +107,11 @@ function App() {
       if (res.ok) {
         const data = await res.json();
         setDelayBetweenPostsMinutes(String(data.delayBetweenPostsMinutes ?? 1));
+        setAutoDiscoveryEnabled(data.autoDiscoveryEnabled === true);
+        setAutoDiscoveryIntervalHours(String(data.autoDiscoveryIntervalHours ?? 6));
+        setAutoDiscoveryKeyword(data.autoDiscoveryKeyword || '');
+        setDiscoverJoinCooldownHours(String(data.discoverJoinCooldownHours ?? 24));
+        setMaxAutoJoinPerRun(String(data.maxAutoJoinPerRun ?? 2));
       }
     } catch (error) { console.error('Fetch settings failed:', error); }
   };
@@ -135,11 +145,23 @@ function App() {
       const res = await fetch(`${API_BASE}/settings`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ delayBetweenPostsMinutes: Number(delayBetweenPostsMinutes || 0) })
+        body: JSON.stringify({
+          delayBetweenPostsMinutes: Number(delayBetweenPostsMinutes || 0),
+          autoDiscoveryEnabled,
+          autoDiscoveryIntervalHours: Number(autoDiscoveryIntervalHours || 0),
+          autoDiscoveryKeyword,
+          discoverJoinCooldownHours: Number(discoverJoinCooldownHours || 0),
+          maxAutoJoinPerRun: Number(maxAutoJoinPerRun || 0)
+        })
       });
       const data = await res.json();
       if (data.success) {
         setDelayBetweenPostsMinutes(String(data.settings?.delayBetweenPostsMinutes ?? 1));
+        setAutoDiscoveryEnabled(data.settings?.autoDiscoveryEnabled === true);
+        setAutoDiscoveryIntervalHours(String(data.settings?.autoDiscoveryIntervalHours ?? 6));
+        setAutoDiscoveryKeyword(data.settings?.autoDiscoveryKeyword || '');
+        setDiscoverJoinCooldownHours(String(data.settings?.discoverJoinCooldownHours ?? 24));
+        setMaxAutoJoinPerRun(String(data.settings?.maxAutoJoinPerRun ?? 2));
       }
     } catch (error) { console.error('Save settings failed:', error); }
     finally { setIsSavingSettings(false); }
@@ -437,6 +459,16 @@ function App() {
                   setImageFolderPath={setImageFolderPath}
                   delayBetweenPostsMinutes={delayBetweenPostsMinutes}
                   setDelayBetweenPostsMinutes={setDelayBetweenPostsMinutes}
+                  autoDiscoveryEnabled={autoDiscoveryEnabled}
+                  setAutoDiscoveryEnabled={setAutoDiscoveryEnabled}
+                  autoDiscoveryIntervalHours={autoDiscoveryIntervalHours}
+                  setAutoDiscoveryIntervalHours={setAutoDiscoveryIntervalHours}
+                  autoDiscoveryKeyword={autoDiscoveryKeyword}
+                  setAutoDiscoveryKeyword={setAutoDiscoveryKeyword}
+                  discoverJoinCooldownHours={discoverJoinCooldownHours}
+                  setDiscoverJoinCooldownHours={setDiscoverJoinCooldownHours}
+                  maxAutoJoinPerRun={maxAutoJoinPerRun}
+                  setMaxAutoJoinPerRun={setMaxAutoJoinPerRun}
                   saveSettings={saveSettings}
                   isSavingSettings={isSavingSettings}
                   workerStatus={workerStatus}
@@ -460,6 +492,16 @@ function App() {
                <PostConfig 
                   delayBetweenPostsMinutes={delayBetweenPostsMinutes}
                   setDelayBetweenPostsMinutes={setDelayBetweenPostsMinutes}
+                  autoDiscoveryEnabled={autoDiscoveryEnabled}
+                  setAutoDiscoveryEnabled={setAutoDiscoveryEnabled}
+                  autoDiscoveryIntervalHours={autoDiscoveryIntervalHours}
+                  setAutoDiscoveryIntervalHours={setAutoDiscoveryIntervalHours}
+                  autoDiscoveryKeyword={autoDiscoveryKeyword}
+                  setAutoDiscoveryKeyword={setAutoDiscoveryKeyword}
+                  discoverJoinCooldownHours={discoverJoinCooldownHours}
+                  setDiscoverJoinCooldownHours={setDiscoverJoinCooldownHours}
+                  maxAutoJoinPerRun={maxAutoJoinPerRun}
+                  setMaxAutoJoinPerRun={setMaxAutoJoinPerRun}
                   saveSettings={saveSettings}
                   isSavingSettings={isSavingSettings}
                   workerStatus={workerStatus}

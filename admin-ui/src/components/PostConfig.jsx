@@ -1,14 +1,19 @@
 import React from 'react';
 import { Icon } from './Icon';
 
-const PostConfig = ({ 
-  postContent, setPostContent, 
-  imageFolderPath, setImageFolderPath, 
+const PostConfig = ({
+  postContent, setPostContent,
+  imageFolderPath, setImageFolderPath,
   manualActorId, setManualActorId,
   delayBetweenPostsMinutes, setDelayBetweenPostsMinutes,
+  autoDiscoveryEnabled, setAutoDiscoveryEnabled,
+  autoDiscoveryIntervalHours, setAutoDiscoveryIntervalHours,
+  autoDiscoveryKeyword, setAutoDiscoveryKeyword,
+  discoverJoinCooldownHours, setDiscoverJoinCooldownHours,
+  maxAutoJoinPerRun, setMaxAutoJoinPerRun,
   saveSettings, isSavingSettings,
   workerStatus, triggerWorkerAction, isWorkerActionLoading,
-  layout = 'full' // 'full', 'content-only', 'controls-only'
+  layout = 'full'
 }) => {
   const showContent = layout === 'full' || layout === 'content-only';
   const showControls = layout === 'full' || layout === 'controls-only';
@@ -19,29 +24,29 @@ const PostConfig = ({
         <div className="flex-1 min-h-0 bg-base-100 rounded-3xl shadow-xl overflow-hidden border border-base-content/5 flex flex-col">
           <div className="p-4 border-b border-base-content/5 bg-base-200/50">
             <h3 className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
-              <Icon.Send /> SOẠN NỘI DUNG
+              <Icon.Send /> SOAN NOI DUNG
             </h3>
           </div>
           <div className="flex-1 p-6 overflow-y-auto space-y-4 terminal-scroll">
             <div className="form-control w-full flex-1 min-h-0">
-              <textarea 
+              <textarea
                 value={postContent}
                 onChange={(e) => setPostContent(e.target.value)}
-                placeholder="Nhập nội dung bài viết..."
+                placeholder="Nhap noi dung bai viet..."
                 className="textarea textarea-bordered w-full h-full flex-1 rounded-2xl bg-base-200 focus:bg-base-100 transition-all font-medium text-sm leading-relaxed p-4"
               />
             </div>
             <div className="space-y-2">
-                <label className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
-                  <Icon.Group /> THƯ MỤC ẢNH
-                </label>
-                <input 
-                    type="text"
-                    value={imageFolderPath}
-                    onChange={(e) => setImageFolderPath(e.target.value)}
-                    placeholder="Ví dụ: C:\HinhAnh"
-                    className="input input-bordered w-full rounded-2xl bg-base-200 focus:bg-base-100 transition-all font-medium text-xs"
-                />
+              <label className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
+                <Icon.Group /> THU MUC ANH
+              </label>
+              <input
+                type="text"
+                value={imageFolderPath}
+                onChange={(e) => setImageFolderPath(e.target.value)}
+                placeholder="Vi du: C:\\HinhAnh"
+                className="input input-bordered w-full rounded-2xl bg-base-200 focus:bg-base-100 transition-all font-medium text-xs"
+              />
             </div>
           </div>
         </div>
@@ -49,27 +54,84 @@ const PostConfig = ({
 
       {showControls && (
         <div className="flex-1 min-h-0 space-y-4 overflow-y-auto terminal-scroll">
-          {/* Settings Section */}
           <div className="bg-base-100 rounded-3xl shadow-xl border border-base-content/5 p-5 space-y-4">
             <h3 className="text-[10px] font-black opacity-50 uppercase tracking-widest flex items-center gap-2">
-              <Icon.Settings /> CÀI ĐẶT
+              <Icon.Settings /> CAI DAT
             </h3>
-            
-            {/* Removed Actor ID setting */}
 
             <div className="space-y-2">
-              <span className="text-[9px] font-bold opacity-40 uppercase">Trễ ngẫu nhiên (1 - {delayBetweenPostsMinutes} Phút)</span>
+              <span className="text-[9px] font-bold opacity-40 uppercase">Delay ngau nhien giua cac bai (1 - {delayBetweenPostsMinutes} phut)</span>
               <input
-                  type="number"
-                  min="0"
-                  value={delayBetweenPostsMinutes}
-                  onChange={(e) => setDelayBetweenPostsMinutes(e.target.value)}
-                  className="input input-sm input-bordered w-full bg-base-200"
+                type="number"
+                min="0"
+                value={delayBetweenPostsMinutes}
+                onChange={(e) => setDelayBetweenPostsMinutes(e.target.value)}
+                className="input input-sm input-bordered w-full bg-base-200"
               />
             </div>
-          </div>
 
-          {/* System Status info removed - redundant with header */}
+            <label className="label cursor-pointer justify-start gap-3">
+              <input
+                type="checkbox"
+                className="toggle toggle-sm toggle-primary"
+                checked={autoDiscoveryEnabled}
+                onChange={(e) => setAutoDiscoveryEnabled(e.target.checked)}
+              />
+              <span className="text-[10px] font-black opacity-70 uppercase tracking-widest">Auto discovery chay nen</span>
+            </label>
+
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold opacity-40 uppercase">Tu khoa discovery</span>
+              <input
+                type="text"
+                value={autoDiscoveryKeyword}
+                onChange={(e) => setAutoDiscoveryKeyword(e.target.value)}
+                placeholder="VD: nha dat, bat dong san"
+                className="input input-sm input-bordered w-full bg-base-200"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold opacity-40 uppercase">Chu ky chay nen (gio)</span>
+              <input
+                type="number"
+                min="1"
+                value={autoDiscoveryIntervalHours}
+                onChange={(e) => setAutoDiscoveryIntervalHours(e.target.value)}
+                className="input input-sm input-bordered w-full bg-base-200"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold opacity-40 uppercase">Cooldown join lai cung nhom (gio)</span>
+              <input
+                type="number"
+                min="0"
+                value={discoverJoinCooldownHours}
+                onChange={(e) => setDiscoverJoinCooldownHours(e.target.value)}
+                className="input input-sm input-bordered w-full bg-base-200"
+              />
+            </div>
+
+            <div className="space-y-2">
+              <span className="text-[9px] font-bold opacity-40 uppercase">Toi da nhom join moi dot</span>
+              <input
+                type="number"
+                min="0"
+                value={maxAutoJoinPerRun}
+                onChange={(e) => setMaxAutoJoinPerRun(e.target.value)}
+                className="input input-sm input-bordered w-full bg-base-200"
+              />
+            </div>
+
+            <button
+              onClick={saveSettings}
+              disabled={isSavingSettings}
+              className="btn btn-primary btn-sm w-full rounded-2xl font-black text-[10px] tracking-widest"
+            >
+              {isSavingSettings ? 'DANG LUU...' : 'LUU CAI DAT'}
+            </button>
+          </div>
         </div>
       )}
     </div>

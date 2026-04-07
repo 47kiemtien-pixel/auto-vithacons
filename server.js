@@ -33,6 +33,7 @@ app.use((err, req, res, next) => {
 const PORT = 3001;
 const settingsPath = path.join(__dirname, 'settings.json');
 const postedHistoryPath = path.join(__dirname, 'posted_history.txt');
+const discoveryStatePath = path.join(__dirname, 'discovery_state.json');
 const APP_TIMEZONE = 'Asia/Ho_Chi_Minh';
 
 const SUPPORTED_PAGES = [
@@ -55,6 +56,8 @@ let isHarvestingVisible = false;
 let visibleHarvestTimer = null;
 let activeClients = [];
 let scanControl = { cancelled: false };
+let autoDiscoveryTimer = null;
+let autoDiscoveryLastRunAt = null;
 
 function formatDateTimeVN(value) {
     if (!value) return '';
@@ -71,15 +74,30 @@ function formatDateTimeVN(value) {
 }
 
 function readSettings() {
-    const defaults = { delayBetweenPostsMinutes: 1 };
+    const defaults = {
+        delayBetweenPostsMinutes: 1,
+        autoDiscoveryEnabled: false,
+        autoDiscoveryIntervalHours: 6,
+        autoDiscoveryKeyword: '',
+        discoverJoinCooldownHours: 24,
+        maxAutoJoinPerRun: 2
+    };
     if (!fs.existsSync(settingsPath)) return defaults;
     try {
         const parsed = JSON.parse(fs.readFileSync(settingsPath, 'utf-8'));
         const parsedDelay = Number(parsed?.delayBetweenPostsMinutes);
+        const parsedInterval = Number(parsed?.autoDiscoveryIntervalHours);
+        const parsedCooldown = Number(parsed?.discoverJoinCooldownHours);
+        const parsedMaxAutoJoin = Number(parsed?.maxAutoJoinPerRun);
         return {
             ...defaults,
             ...parsed,
-            delayBetweenPostsMinutes: Number.isFinite(parsedDelay) && parsedDelay >= 0 ? parsedDelay : defaults.delayBetweenPostsMinutes
+            delayBetweenPostsMinutes: Number.isFinite(parsedDelay) && parsedDelay >= 0 ? parsedDelay : defaults.delayBetweenPostsMinutes,
+            autoDiscoveryEnabled: parsed?.autoDiscoveryEnabled === true,
+            autoDiscoveryIntervalHours: Number.isFinite(parsedInterval) && parsedInterval > 0 ? parsedInterval : defaults.autoDiscoveryIntervalHours,
+            autoDiscoveryKeyword: String(parsed?.autoDiscoveryKeyword || '').trim(),
+            discoverJoinCooldownHours: Number.isFinite(parsedCooldown) && parsedCooldown >= 0 ? parsedCooldown : defaults.discoverJoinCooldownHours,
+            maxAutoJoinPerRun: Number.isFinite(parsedMaxAutoJoin) && parsedMaxAutoJoin >= 0 ? Math.floor(parsedMaxAutoJoin) : defaults.maxAutoJoinPerRun
         };
     } catch (_) {
         return defaults;
@@ -88,11 +106,100 @@ function readSettings() {
 
 function writeSettings(nextSettings) {
     const rawDelay = Number(nextSettings?.delayBetweenPostsMinutes);
+    const rawInterval = Number(nextSettings?.autoDiscoveryIntervalHours);
+    const rawCooldown = Number(nextSettings?.discoverJoinCooldownHours);
+    const rawMaxAutoJoin = Number(nextSettings?.maxAutoJoinPerRun);
     const normalized = {
-        delayBetweenPostsMinutes: Number.isFinite(rawDelay) && rawDelay >= 0 ? rawDelay : 1
+        delayBetweenPostsMinutes: Number.isFinite(rawDelay) && rawDelay >= 0 ? rawDelay : 1,
+        autoDiscoveryEnabled: nextSettings?.autoDiscoveryEnabled === true,
+        autoDiscoveryIntervalHours: Number.isFinite(rawInterval) && rawInterval > 0 ? rawInterval : 6,
+        autoDiscoveryKeyword: String(nextSettings?.autoDiscoveryKeyword || '').trim(),
+        discoverJoinCooldownHours: Number.isFinite(rawCooldown) && rawCooldown >= 0 ? rawCooldown : 24,
+        maxAutoJoinPerRun: Number.isFinite(rawMaxAutoJoin) && rawMaxAutoJoin >= 0 ? Math.floor(rawMaxAutoJoin) : 2
     };
     fs.writeFileSync(settingsPath, JSON.stringify(normalized, null, 2), 'utf-8');
     return normalized;
+}
+
+function readDiscoveryState() {
+    if (!fs.existsSync(discoveryStatePath)) return {};
+    try {
+        return JSON.parse(fs.readFileSync(discoveryStatePath, 'utf-8'));
+    } catch (_) {
+        return {};
+    }
+}
+
+function writeDiscoveryState(state) {
+    fs.writeFileSync(discoveryStatePath, JSON.stringify(state, null, 2), 'utf-8');
+}
+
+function getDiscoveryRecord(pageId, groupUrl) {
+    const state = readDiscoveryState();
+    const key = `${pageId || 'global'}::${(groupUrl || '').trim().toLowerCase()}`;
+    return state[key] || null;
+}
+
+function upsertDiscoveryRecord(pageId, groupUrl, patch = {}) {
+    const state = readDiscoveryState();
+    const key = `${pageId || 'global'}::${(groupUrl || '').trim().toLowerCase()}`;
+    state[key] = {
+        ...(state[key] || {}),
+        pageId: pageId || '',
+        url: groupUrl,
+        ...patch
+    };
+    writeDiscoveryState(state);
+    return state[key];
+}
+
+function shouldAttemptJoin(group, pageId, settings) {
+    if (!group?.url || !group.canJoin || group.isJoined) return false;
+    const existingGroups = readGroupsData(pageId);
+    const alreadyKnown = existingGroups.some((item) => (item.url || '').replace(/\/$/, '') === (group.url || '').replace(/\/$/, ''));
+    if (alreadyKnown) return false;
+
+    const record = getDiscoveryRecord(pageId, group.url);
+    if (!record?.lastJoinAttemptAt) return true;
+
+    const cooldownMs = Math.max(0, Number(settings.discoverJoinCooldownHours) || 0) * 60 * 60 * 1000;
+    if (cooldownMs === 0) return true;
+    return Date.now() - Number(record.lastJoinAttemptAt) >= cooldownMs;
+}
+
+function scheduleAutoDiscovery() {
+    if (autoDiscoveryTimer) {
+        clearInterval(autoDiscoveryTimer);
+        autoDiscoveryTimer = null;
+    }
+
+    const settings = readSettings();
+    if (!settings.autoDiscoveryEnabled || !settings.autoDiscoveryKeyword) {
+        return;
+    }
+
+    const intervalMs = Math.max(1, Number(settings.autoDiscoveryIntervalHours) || 1) * 60 * 60 * 1000;
+    autoDiscoveryTimer = setInterval(() => {
+        runAutoDiscoveryTick().catch((error) => {
+            broadcastLog({ type: 'error', message: `Lỗi auto-discovery: ${error.message}`, source: 'discovery' });
+        });
+    }, intervalMs);
+}
+
+async function runAutoDiscoveryTick() {
+    const settings = readSettings();
+    if (!settings.autoDiscoveryEnabled || !settings.autoDiscoveryKeyword || isDiscovering) return;
+
+    autoDiscoveryLastRunAt = Date.now();
+    broadcastLog({
+        type: 'info',
+        message: `Auto-discovery chạy nền với từ khóa "${settings.autoDiscoveryKeyword}"`,
+        source: 'discovery'
+    });
+
+    for (const page of SUPPORTED_PAGES) {
+        await runDiscoveryProcess(settings.autoDiscoveryKeyword, true, page.id, { source: 'auto' });
+    }
 }
 
 function readPostedHistoryMap() {
@@ -172,6 +279,12 @@ function upsertGroupData(group, pageId) {
     if (index === -1) groups.push(group);
     else groups[index] = { ...groups[index], ...group };
     writeGroupsData(groups, pageId);
+}
+
+function isConfirmedJoinResult(result) {
+    if (result === true) return true;
+    if (!result || typeof result !== 'object') return false;
+    return result.status === 'joined' || result.status === 'requested';
 }
 
 function normalizeKeyword(text = '') {
@@ -300,22 +413,52 @@ app.get('/api/settings', (req, res) => {
 app.get('/api/worker-status', (req, res) => {
     const pageId = req.query.pageId;
     const groups = readGroupsData(pageId);
+    const settings = readSettings();
     res.json({
         isRunning: isPosting,
         pendingCount: groups.filter(g => g.isSelectable).length,
         isScanning: isScanning,
-        isDiscovering: isDiscovering
+        isDiscovering: isDiscovering,
+        autoDiscoveryEnabled: settings.autoDiscoveryEnabled,
+        autoDiscoveryIntervalHours: settings.autoDiscoveryIntervalHours,
+        autoDiscoveryLastRunAt
     });
 });
 
 app.post('/api/settings', (req, res) => {
     if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu' });
     const delayBetweenPostsMinutes = Number(req.body.delayBetweenPostsMinutes);
+    const autoDiscoveryIntervalHours = Number(req.body.autoDiscoveryIntervalHours);
+    const discoverJoinCooldownHours = Number(req.body.discoverJoinCooldownHours);
+    const maxAutoJoinPerRun = Number(req.body.maxAutoJoinPerRun);
+    const autoDiscoveryKeyword = String(req.body.autoDiscoveryKeyword || '').trim();
+    const autoDiscoveryEnabled = req.body.autoDiscoveryEnabled === true;
     if (!Number.isFinite(delayBetweenPostsMinutes) || delayBetweenPostsMinutes < 0) {
         return res.status(400).json({ error: 'Thời gian chờ không hợp lệ.' });
     }
-    const saved = writeSettings({ delayBetweenPostsMinutes });
-    broadcastLog({ type: 'info', message: `Đã lưu cài đặt: Delay=${saved.delayBetweenPostsMinutes}p`, source: 'settings' });
+    if (!Number.isFinite(autoDiscoveryIntervalHours) || autoDiscoveryIntervalHours <= 0) {
+        return res.status(400).json({ error: 'Chu kỳ auto-discovery không hợp lệ.' });
+    }
+    if (!Number.isFinite(discoverJoinCooldownHours) || discoverJoinCooldownHours < 0) {
+        return res.status(400).json({ error: 'Cooldown join không hợp lệ.' });
+    }
+    if (!Number.isFinite(maxAutoJoinPerRun) || maxAutoJoinPerRun < 0) {
+        return res.status(400).json({ error: 'Giới hạn join mỗi đợt không hợp lệ.' });
+    }
+    const saved = writeSettings({
+        delayBetweenPostsMinutes,
+        autoDiscoveryEnabled,
+        autoDiscoveryIntervalHours,
+        autoDiscoveryKeyword,
+        discoverJoinCooldownHours,
+        maxAutoJoinPerRun
+    });
+    scheduleAutoDiscovery();
+    broadcastLog({
+        type: 'info',
+        message: `Đã lưu cài đặt: Delay=${saved.delayBetweenPostsMinutes}p | Auto=${saved.autoDiscoveryEnabled ? 'on' : 'off'} | ${saved.autoDiscoveryIntervalHours}h/lần | Cooldown join=${saved.discoverJoinCooldownHours}h | Max join=${saved.maxAutoJoinPerRun}`,
+        source: 'settings'
+    });
     res.json({ success: true, settings: saved });
 });
 
@@ -385,7 +528,14 @@ app.post('/api/stop-visible-harvest', (req, res) => {
 
 app.post('/api/discover-groups', (req, res) => {
     if (!req.body) return res.status(400).json({ error: 'Thiếu dữ liệu yêu cầu (body)' });
-    runDiscoveryProcess(req.body.keyword || '', req.body.autoJoin === true, req.body.pageId);
+    const keyword = String(req.body.keyword || '').trim();
+    const currentSettings = readSettings();
+    writeSettings({
+        ...currentSettings,
+        autoDiscoveryKeyword: keyword || currentSettings.autoDiscoveryKeyword
+    });
+    scheduleAutoDiscovery();
+    runDiscoveryProcess(keyword, req.body.autoJoin === true, req.body.pageId, { source: 'manual' });
     res.json({ success: true, message: 'Đang khám phá ngầm...' });
 });
 
@@ -394,14 +544,14 @@ app.post('/api/join-group', async (req, res) => {
     const { url, name, pageId } = req.body;
     try {
         const context = await browserManager.getContext();
-        const success = await execJoinGroup(context, url, (msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
-        if (success && pageId && name) {
+        const joinResult = await execJoinGroup(context, url, (msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
+        if (isConfirmedJoinResult(joinResult) && pageId && name) {
             const match = url.match(/facebook\.com\/groups\/([^/?#]+)/i);
             const groupId = match ? decodeURIComponent(match[1]).trim() : 'unknown';
             upsertGroupData({ id: groupId, name, url, lastPostStatus: 'Sẵn sàng', isSelectable: true }, pageId);
             broadcastLog({ type: 'info', message: `Đã tự động thêm nhóm mới vào danh sách: ${name}`, source: 'discovery' });
         }
-        res.json({ success });
+        res.json({ success: isConfirmedJoinResult(joinResult), joinResult });
     } catch (e) {
         res.status(500).json({ error: e.message });
     }
@@ -495,13 +645,14 @@ app.get('/api/logs', (req, res) => {
     req.on('close', () => activeClients = activeClients.filter(c => c.id !== client.id));
 });
 
-async function runDiscoveryProcess(keyword, autoJoin = false, pageId) {
+async function runDiscoveryProcess(keyword, autoJoin = false, pageId, options = {}) {
     if (isDiscovering) return;
     isDiscovering = true;
+    const source = options.source || 'manual';
+    const settings = readSettings();
     broadcastLog({ type: 'info', message: `🔍 Khám phá nhóm: "${keyword}"`, source: 'discovery' });
     try {
         const context = await browserManager.getContext();
-        const automator = new FBAutomator((msg) => broadcastLog({ type: 'info', message: msg, source: 'discovery' }));
         // Không gọi init/login ở đây vì context đã được browserManager quản lý và có thể đã login rồi.
         // Tuy nhiên để an toàn nếu FBAutomator cần:
         // await automator.init(context); 
@@ -510,15 +661,55 @@ async function runDiscoveryProcess(keyword, autoJoin = false, pageId) {
                 try { broadcastLog({ ...JSON.parse(msg.substring(11)), source: 'discovery' }); } catch(e) {}
             } else broadcastLog({ type: 'info', message: msg, source: 'discovery' });
         });
+        for (const g of groups) {
+            upsertDiscoveryRecord(pageId, g.url, {
+                name: g.name,
+                lastSeenAt: Date.now(),
+                lastDiscoverySource: source
+            });
+        }
         if (autoJoin) {
-            for (const g of groups.filter(x => x.canJoin && !x.isJoined)) {
-                const success = await execJoinGroup(context, g.url, (m) => broadcastLog({ type: 'info', message: m, source: 'discovery' }));
-                if (success && pageId) {
+            const joinableGroups = groups.filter((group) => shouldAttemptJoin(group, pageId, settings));
+            const limitedGroups = joinableGroups.slice(0, settings.maxAutoJoinPerRun);
+            if (joinableGroups.length > limitedGroups.length) {
+                broadcastLog({
+                    type: 'info',
+                    message: `Đang giới hạn join để tránh spam: ${limitedGroups.length}/${joinableGroups.length} nhóm trong đợt này.`,
+                    source: 'discovery'
+                });
+            }
+            for (const g of limitedGroups) {
+                upsertDiscoveryRecord(pageId, g.url, {
+                    name: g.name,
+                    lastSeenAt: Date.now(),
+                    lastJoinAttemptAt: Date.now(),
+                    lastJoinStatus: 'attempting'
+                });
+                const joinResult = await execJoinGroup(context, g.url, (m) => broadcastLog({ type: 'info', message: m, source: 'discovery' }));
+                const joinConfirmed = isConfirmedJoinResult(joinResult);
+                if (joinConfirmed && pageId) {
                     const match = g.url.match(/facebook\.com\/groups\/([^/?#]+)/i);
                     const groupId = match ? decodeURIComponent(match[1]).trim() : 'unknown';
                     upsertGroupData({ id: groupId, name: g.name, url: g.url, lastPostStatus: 'Sẵn sàng', isSelectable: true }, pageId);
                 }
-                await new Promise(r => setTimeout(r, 5000));
+                if (joinConfirmed) {
+                    upsertDiscoveryRecord(pageId, g.url, {
+                        name: g.name,
+                        lastSeenAt: Date.now(),
+                        lastJoinAttemptAt: Date.now(),
+                        lastJoinSuccessAt: Date.now(),
+                        lastJoinStatus: joinResult.status
+                    });
+                } else {
+                    upsertDiscoveryRecord(pageId, g.url, {
+                        name: g.name,
+                        lastSeenAt: Date.now(),
+                        lastJoinAttemptAt: Date.now(),
+                        lastJoinStatus: joinResult?.status || 'failed',
+                        lastJoinReason: joinResult?.reason || ''
+                    });
+                }
+                await new Promise(r => setTimeout(r, 15000));
             }
         }
         broadcastLog({ type: 'done', message: 'Hoàn thành khám phá.', source: 'discovery' });
@@ -529,4 +720,5 @@ async function runDiscoveryProcess(keyword, autoJoin = false, pageId) {
 
 app.listen(PORT, () => {
     console.log(`[Server] running at http://localhost:${PORT}`);
+    scheduleAutoDiscovery();
 });
