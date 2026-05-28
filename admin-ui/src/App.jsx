@@ -48,7 +48,7 @@ function App() {
   const [selectedPageId, setSelectedPageId] = useState(localStorage.getItem('selectedPageId') || '');
 
 
-  const API_BASE = 'http://localhost:3001/api';
+  const API_BASE = 'http://localhost:3005/api';
 
   useEffect(() => {
     document.documentElement.setAttribute('data-theme', theme);

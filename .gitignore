@@ -54,3 +54,6 @@ fb_coccoc_profile/
 tools/
 tmp_*.js
 test_results_*.txt
+
+# Ignore backhoa folder as requested by the user
+backhoa/

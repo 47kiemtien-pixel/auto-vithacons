@@ -30,7 +30,7 @@ app.use((err, req, res, next) => {
     next();
 });
 
-const PORT = 3001;
+const PORT = 3005;
 const settingsPath = path.join(__dirname, 'settings.json');
 const postedHistoryPath = path.join(__dirname, 'posted_history.txt');
 const discoveryStatePath = path.join(__dirname, 'discovery_state.json');

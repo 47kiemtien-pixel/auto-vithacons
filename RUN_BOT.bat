@@ -37,23 +37,23 @@ echo           HE THONG POSTBOT - TU DONG HOA FB
 echo ======================================================
 echo.
 
-echo [1/3] Dang don dep cac tien trinh cu (Node.js)...
-taskkill /F /IM node.exe /T 2>nul
-timeout /t 2 /nobreak >nul
+echo [1/3] Bỏ qua bước dọn dẹp tiến trình Node.js cũ (để giữ các bot khác đang chạy)...
+rem taskkill /F /IM node.exe /T 2>nul
+timeout /t 1 /nobreak >nul
 
-echo [2/3] Dang khoi chay Server Backend (Cong 3001)...
+echo [2/3] Dang khoi chay Server Backend (Cong 3005)...
 start "PostBot-Backend" cmd /k "cd /d "%ROOT_DIR%" && "%NODE_EXE%" server.js"
 
-echo [3/3] Dang khoi chay Giao dien Frontend (Cong 5173)...
-start "PostBot-Frontend" cmd /k "cd /d "%ROOT_DIR%admin-ui" && npx vite"
+echo [3/3] Dang khoi chay Giao dien Frontend (Cong 5175)...
+start "PostBot-Frontend" cmd /k "cd /d "%ROOT_DIR%admin-ui" && npx vite --port 5175"
 
 echo.
 echo ======================================================
 echo   BOT DA KHOI DONG XONG!
-echo   1. Giao dien web: http://localhost:5173
-echo   2. API Backend: http://localhost:3001
+echo   1. Giao dien web: http://localhost:5175
+echo   2. API Backend: http://localhost:3005
 echo.
-echo   Luu y: Vui long khong dong cac cua so vưa hien len.
+echo   Luu y: Vui long khong dong cac cua so vua hien len.
 echo ======================================================
 echo.
 pause
